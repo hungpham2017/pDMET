@@ -2,12 +2,12 @@ import setuptools
 
 if __name__ == "__main__":
     setuptools.setup(
-        name='mpDMET',
-        version="0.1",
+        name='pDMET',
+        version="1.0.0",
         description='Density matrix embedding theory for periodic systems',
         author='Hung Pham',
-        author_email='phamx494@umn.edu',
-        url="https://github.com/hungpham2017/mpdmet.git",
+        author_email='pqh3.14@gmail.com',
+        url="https://github.com/hungpham2017/pDMET.git",
         license='Apache 2.0',
         packages=setuptools.find_packages(),
         install_requires=[

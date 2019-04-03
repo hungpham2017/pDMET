@@ -1,72 +1,48 @@
 '''
-Multipurpose Density Matrix Embedding theory (mp-DMET)
-Hung Q. Pham
-email: pqh3.14@gmail.com
+pDMET: Density Matrix Embedding theory for Periodic Systems
+Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
+A few functions in pDMET are modifed from QC-DMET Copyright (C) 2015 Sebastian Wouters
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Email: Hung Q. Pham <pqh3.14@gmail.com>
 '''
 
 import numpy as np
-import scipy as scipy
-from functools import reduce
-from mpdmet.lib.build import libdmet
+from pDMET.lib.build import libdmet
 
-class RHF_decomposition:
-	def __init__(self, cell, impOrbs, numBathOrbs, locOED_Ls, method = 'OED'):	
+class HF_decomposition:
+	def __init__(self, cell, impOrbs, numBathOrbs, locOED_Ls):	
 		self.cell = cell
 		self.impOrbs = impOrbs
-		self.method = method
 		self.numBathOrbs = numBathOrbs		
-		self.locMO_Ls, self.locOED_Ls = locOED_Ls
+		self.locOED_Ls = locOED_Ls
 		
-	def baths(self):
+	def baths(self, threshold):
 		'''
-		This function is used to call the Schmidt basis using either an overlap matrix or 1-rdm (or OED)
+		This function is used to call the Schmidt basis using 1-rdm
 		'''                  
-		if self.method == 'OED':  
-			return self.UsingOED(self.numBathOrbs, threshold = 1e-13)
-		elif self.method == 'overlap':
-			return self.UsingOverlap(self.numBathOrbs, threshold = 1e-7)
+		return self.UsingOED(self.numBathOrbs, threshold = threshold)
 			
-	def UsingOverlap(self, numBathOrbs, threshold = 1e-7):
-		'''
-		Construct the RHF bath using a projector
-		ref: PHYSICAL REVIEW B 89, 035140 (2014)
-		'''
-
-		# Build the projectors for fragment and bath
-		nao = self.cell.nao_nr()
-		P_F = np.zeros((nao,nao))
-		P_F[self.impOrbs == 1,self.impOrbs == 1] = 1
-		P_B = np.identity(nao)- P_F		
-		
-		
-		# Build the overlap matrix between hole states and fragment orbs
-		nelec_pairs = self.cell.nelectron // 2 	
-		Occ = self.orthoMO_Ls[:,:nelec_pairs]
-		M = reduce(np.dot,(Occ.T, P_F,Occ))
-		d, V = np.linalg.eigh(M) 				# 0 <= d <= 1
-		idx = (-d).argsort() 					#d close to 1 come first
-		d, V = d[idx], V[:, idx] 
-		tokeep = np.sum(d > threshold)
-		if tokeep < numBathOrbs:
-			print ("BATH CONSTRUCTION: using only ", tokeep, " orbitals which are within ", threshold, " of 0 or 1")
-		numBathOrbs = min(tokeep, numBathOrbs) #TODO: throw away some bath orbitals scheme for this construction????
-		
-		Forbs = np.einsum('pi,up->ui',V[:,:tokeep], np.dot(P_F, Occ))/np.sqrt(d[:numBathOrbs], optimize=True)
-		Borbs = np.einsum('pi,up->ui',V[:,:tokeep], np.dot(P_B, Occ))/np.sqrt(1 - d[:numBathOrbs], optimize=True)
-		
-		pureEnorbs = np.einsum('pi,up->ui', V[:,tokeep:], Occ, optimize=True)
-		entorbs = np.einsum('pi,up->ui', V[:,:tokeep], Occ, optimize=True)		
-		FBEorbs = np.hstack((Forbs, Borbs, pureEnorbs))
-			
-		return (numBathOrbs, FBEorbs, entorbs)
-			
-	def UsingOED( self, numBathOrbs, threshold=1e-13 ):
+	def UsingOED(self, numBathOrbs, threshold = 1e-8):
 		'''
 		Construct the RHF bath using one-electron density matrix (OED)
 		This function is a modified version of qcdmethelper/constructbath funtion 
 		in the QC-DMET <Copyright (C) 2015 Sebastian Wouters>
 		ref: 
 			J. Chem. Theory Comput. 2016, 12, 2706−2719
+            
+		This should work for an KROHF wfs too, resulting in an ROHF bath  with the number of bath orbitals: num_impurity + 2S          
 		'''	
 		
 		OneDM = self.locOED_Ls	
@@ -82,11 +58,14 @@ class RHF_decomposition:
 		numTotalOrbs = len(impurityOrbs)
 		eigenvals, eigenvecs = np.linalg.eigh(embedding1RDM, UPLO='U')  	# 0 <= eigenvals <= 2		
 		idx = np.maximum(-eigenvals, eigenvals - 2.0).argsort() # Occupation numbers closest to 1 come first
-		
-		#TODO: whether the truncation should be used
-		tokeep = np.sum(-np.maximum(-eigenvals, eigenvals - 2.0)[idx] > threshold)
-		if tokeep < numBathOrbs:
-			print ("DMET::constructbath : Throwing out", numBathOrbs - tokeep, "orbitals which are within", threshold, "of 0 or 2.")
+        
+		if threshold == False:
+			tokeep = numBathOrbs
+		else:
+			tokeep = np.sum(-np.maximum(-eigenvals, eigenvals - 2.0)[idx] > threshold)
+			if tokeep < numBathOrbs:
+				print ("   Bath construction: Throw out", numBathOrbs - tokeep, "orbitals using the threshold", threshold)
+                
 		numBathOrbs = min(np.sum(tokeep), numBathOrbs)
 		
 		eigenvals = eigenvals[idx]
