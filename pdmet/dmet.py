@@ -68,6 +68,7 @@ class pDMET:
         self.SC_threshold       = 1e-8            
         self.SC_maxcycle        = 200
         self.SC_CFtype          = 'F' # Options: ['F','diagF', 'FB','diagFB']
+        self.doSCF              = False
         self.alt_CF             = False         
         self.damping            = 1.0 # 1.0 means no damping
         self.DIIS               = True           
@@ -287,7 +288,7 @@ class pDMET:
         
         print("--------------------------------------------------------------------")   
         
-        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, 'FOCK')        # get both MO coefficients and 1-RDM in the local basis
+        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, 'FOCK', self.doSCF, self.verbose)        # get both MO coefficients and 1-RDM in the local basis
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
         solver = self.solver
@@ -321,7 +322,7 @@ class pDMET:
 
         self.cycle = 1       
         # Optimize the chemical potential          
-        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type)        # get both MO coefficients and 1-RDM in the local basis     
+        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type, self.doSCF, self.verbose)        # get both MO coefficients and 1-RDM in the local basis     
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
         self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)       
@@ -375,7 +376,7 @@ class pDMET:
         #---- SELF-CONSISTENCY PROCEDURE ----#      
         #------------------------------------#      
         u_diff = 1.0
-        rdm1 = self.local.construct_locOED_kpts(self.umat, self.OEH_type)
+        rdm1 = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.doSCF, self.verbose)
         for cycle in range(self.SC_maxcycle):
             
             print("- CYCLE %d:" % (cycle + 1))    
@@ -398,7 +399,7 @@ class pDMET:
                 
             self.uvec = result.x
             self.umat = self.uvec2umat(self.uvec)   
-            rdm1  = self.local.construct_locOED_kpts(self.umat, self.OEH_type)   
+            rdm1  = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.doSCF, self.verbose)   
             
             if self.umat_kpt == True:
                 self.umat = np.asarray([self.umat[kpt] - np.eye(self.umat[kpt].shape[0])*np.average(np.diag(self.umat[kpt])) for kpt in range(self.nkpts)])            
@@ -492,7 +493,7 @@ class pDMET:
             error            : an array of errors for the unit cell.
         '''
         
-        locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type)
+        locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type, self.doSCF, self.verbose)
         if self.SC_CFtype in ['F', 'diagF']:        
             mf_1RDM = reduce(np.dot, (self.emb_orbs[:,:self.nImps].T, locOED, self.emb_orbs[:,:self.nImps]))
             corr_1RDM = self.emb_1RDM[:self.nImps,:self.nImps]    
@@ -547,7 +548,7 @@ class pDMET:
         '''
       
         umat = self.uvec2umat(uvec)
-        locOED_kpts = self.local.construct_locOED_kpts(umat, self.OEH_type)       
+        locOED_kpts = self.local.construct_locOED_kpts(umat, self.OEH_type, self.doSCF, self.verbose)       
         if self.OEH_type == 'OEI':
             e_fun = 1./self.nkpts * np.einsum('kij,kji->', self.local.loc_actOEI_kpts, locOED_kpts).real
         elif self.OEH_type == 'FOCK':
@@ -704,9 +705,22 @@ class pDMET:
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kmf.kpts
         ao2loc = self.local.CO
-        activeDMloc_kpts = self.local.construct_locOED_kpts(self.umat, 'OEI', doSCF=True, verbose=verbose)
-        activeDMao_kpts = np.asarray([reduce(np.dot,(ao2loc[kpt], activeDMloc_kpts[kpt],ao2loc[kpt].conj().T)) for kpt in range(self.nkpts)])
         
+        # Run SCF for the umat optimization
+        self.OEH_type = 'OEI'
+        self.doSCF = False
+        self.verbose = verbose
+        uvec = np.zeros_like(self.uvec)
+        if self.SC_method in ['BFGS', 'L-BFGS-B', 'CG', 'Newton-CG']:
+            result = optimize.minimize(self.CF, self.uvec, method = self.SC_method, options = {'disp': False, 'gtol': 1e-12})
+        self.uvec = result.x
+        self.umat = self.uvec2umat(self.uvec)
+        umat = self.umat - self.local.loc_actVHF_kpts
+        activeDMloc_kpts = self.local.construct_locOED_kpts(umat, 'OEI', doSCF=True, verbose=verbose)
+        print("   + Cost function             : %20.15f" % (result.fun))
+        print("DEBUG",self.umat)
+        activeDMao_kpts = np.asarray([reduce(np.dot,(ao2loc[kpt], activeDMloc_kpts[kpt],ao2loc[kpt].conj().T)) for kpt in range(self.nkpts)])
+         
         # Total RDM1:
         dm_kpts = self.local.coreDM_kpts + activeDMao_kpts
         fock = self.kmf.get_hcore(cell, kpts) + self.kmf.get_veff(cell=cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)

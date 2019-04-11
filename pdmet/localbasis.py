@@ -170,13 +170,13 @@ class WF:
 
         return loc_OED
         
-    def construct_locOED_Ls(self, umat, OEH_type):
+    def construct_locOED_Ls(self, umat, OEH_type, doSCF=False, verbose=0):
         '''
         Construct MOs/one-electron density matrix dm_{pq}^{0L} at each lattice vector
         with a certain k-independent correlation potential umat
         '''    
     
-        loc_OED = self.construct_locOED_kpts(umat, OEH_type)
+        loc_OED = self.construct_locOED_kpts(umat, OEH_type, doSCF=doSCF, verbose=verbose)
         loc_OED_Ls = libdmet.iFFT1e(self.tmap, self.phase, loc_OED).real        
         return loc_OED_Ls
         
