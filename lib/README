@@ -1,7 +1,7 @@
 To help finding MKL, follow these steps:
 
-$ export MKLROOT=/panfs/roc/groups/6/gagliard/phamx494/QC-DMET/src/anaconda
-$ export LD_LIBRARY_PATH=$MKLROOT/lib:$LD_LIBRARY_PATH
-$ cd pDMET/lib/build
-$ cmake -DBLA_VENDOR=Intel10_64lp_seq ..
-$ make
+cd pDMET/lib/build
+export MKLROOT=/panfs/roc/groups/6/gagliard/phamx494/anaconda3/lib
+export LD_LIBRARY_PATH=$MKLROOT/lib:$LD_LIBRARY_PATH
+cmake -DBLA_VENDOR=Intel10_64lp_seq ..
+make

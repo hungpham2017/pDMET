@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -51,6 +52,7 @@ def save_kmf(kmf, chkfile):
         exxdiv = 'None'
     else:
         exxdiv      = kmf.exxdiv
+    max_memory      = kmf.max_memory
     e_tot           = kmf.e_tot
     kpts            = kmf.kpts
     mo_occ_kpts     = kmf.mo_occ_kpts
@@ -60,6 +62,7 @@ def save_kmf(kmf, chkfile):
     make_rdm1       = kmf.make_rdm1()
     
     kmf_dic = { 'exxdiv'            : exxdiv, 
+                'max_memory'        : max_memory,
                 'e_tot'             : e_tot,
                 'kpts'              : kpts,
                 'mo_occ_kpts'       : mo_occ_kpts,
@@ -70,7 +73,7 @@ def save_kmf(kmf, chkfile):
                 
     save(chkfile, 'scf', kmf_dic)
     
-def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False):
+def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False, max_memory=4000):
     '''
         Save a kmf object
     '''
@@ -78,7 +81,8 @@ def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False):
     save_kmf = load(chkfile, 'scf')
     
     class with_df:
-        def __init__(self, kmf):
+        def __init__(self, kmf, memory):
+            kmf.with_df.max_memory = memory
             self.ao2mo = lambda COijkl, kptijkl, compact: kmf.with_df.ao2mo(COijkl, kptijkl, compact)      
             
     class fake_kmf:
@@ -101,8 +105,12 @@ def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False):
             self.get_hcore  = lambda *arg, **kwargs: kmf.get_hcore(*arg, **kwargs)
             self.get_jk     = lambda *arg, **kwargs: kmf.get_jk(*arg, **kwargs)
             self.get_veff   = lambda *arg, **kwargs: kmf.get_veff(*arg, **kwargs)
-            self.get_bands  = lambda *arg, **kwargs: kmf.get_bands(*arg, **kwargs)                        
-            self.with_df    = with_df(kmf)
+            self.get_bands  = lambda *arg, **kwargs: kmf.get_bands(*arg, **kwargs) 
+            if hasattr(kmf,'max_memory'):
+                self.max_memory = kmf.max_memory
+            else:
+                self.max_memory = max_memory
+            self.with_df    = with_df(kmf, self.max_memory)
             
     final_kmf = fake_kmf(save_kmf)
     

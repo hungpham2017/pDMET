@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -80,7 +81,7 @@ class pDMET:
         self.state_percent  = None        
         self.twoS           = 0
         self.verbose        = 0
-        self.memory         = 4000  # in MB      
+        self.max_memory     = 4000  # in MB      
         self.locOED_Ls      = None
         self.baths          = None
         self.emb_1RDM       = None
@@ -102,12 +103,12 @@ class pDMET:
         Prepare the local integrals, correlation/chemical potential    
         '''    
         
-        print("Initializing ...")
+        tprint.print_msg("Initializing ...")
         
         # -------------------------------------------------        
         # General initialized attributes 
         if self.kmf_chkfile != None:
-            self.kmf = tchkfile.load_kmf(self.cell, self.kmf, self.w90.mp_grid_loc, self.kmf_chkfile, symmetrize = self.kmesh_sym)
+            self.kmf = tchkfile.load_kmf(self.cell, self.kmf, self.w90.mp_grid_loc, self.kmf_chkfile, symmetrize = self.kmesh_sym, max_memory=self.max_memory)
         elif self.kmesh_sym == True:
             self.kmf = tchkfile.symmetrize_kmf(self.cell, self.kmf) 
             
@@ -176,9 +177,9 @@ class pDMET:
 
             if self.chempot == None or self.chempot == False:
                 self.restart_success = False            
-                print("-> Cannot load the saved chemical and correlation potential") 
+                tprint.print_msg("-> Cannot load the saved chemical and correlation potential") 
             else:
-                print("-> Load the saved chemical and correlation potential") 
+                tprint.print_msg("-> Load the saved chemical and correlation potential") 
 
         if self.restart_success == False:
             self.chempot = 0.0        
@@ -205,9 +206,9 @@ class pDMET:
 
         # For FCI solver
         self._SS = 0.5*self.twoS*(0.5*self.twoS + 1)       
-        self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self.e_shift, self.nroots, self.state_percent, self.verbose, self.memory) 
+        self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self.e_shift, self.nroots, self.state_percent, verbose=self.verbose, memory=self.max_memory) 
         
-        print("Initializing ... DONE")       
+        tprint.print_msg("Initializing ... DONE")       
                 
     def kernel(self, chempot = 0.0):
         '''
@@ -249,7 +250,7 @@ class pDMET:
         dmetCoreJK = self.local.dmet_corejk(FBEorbs, Norb_in_imp, core1RDM_local)
 
         # Solving the embedding problem with high level wfs
-        if self.cycle == 1 : print("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" % (Nelec_in_imp, numImpOrbs, numBathOrbs))                        
+        if self.cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" % (Nelec_in_imp, numImpOrbs, numBathOrbs))                        
         DMguess = reduce(np.dot,(FBEorbs[:,:Norb_in_imp].T, self.locOED_Ls, FBEorbs[:,:Norb_in_imp]))    
         
         self.qcsolver.initialize(self.local.e_core, dmetOEI, dmetTEI, \
@@ -274,21 +275,21 @@ class pDMET:
         self.nelec_cell = np.trace(RDM1[:numImpOrbs,:numImpOrbs])
     
         if not np.isclose(self._SS, self.qcsolver.SS): 
-            print("           WARNING: Spin contamination. Computed <S^2>: %10.8f, Target: %10.8f" % (self.qcsolver.SS, self._SS)) 
+            tprint.print_msg("           WARNING: Spin contamination. Computed <S^2>: %10.8f, Target: %10.8f" % (self.qcsolver.SS, self._SS)) 
             
         # Get the cell energy:         
         self.e_tot = e_cell 
         
         return self.nelec_cell
 
-    def check_exact(self):
+    def check_exact(self, error = 1.e-8):
         '''
         Do one-shot DMET, only the chemical potential is optimized
         '''
         
-        print("--------------------------------------------------------------------")   
+        tprint.print_msg("--------------------------------------------------------------------")   
         
-        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, 'FOCK', self.doSCF, self.verbose)        # get both MO coefficients and 1-RDM in the local basis
+        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, 'FOCK', False, self.verbose)        
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
         solver = self.solver
@@ -296,8 +297,12 @@ class pDMET:
         nelec_cell = self.kernel(chempot = 0.0)
         self.solver = solver        
         
-        if abs(self.e_tot - self.kmf.e_tot) < 1.e-8 :         
-            print("   HF-in-HF embedding is exact: True")
+        diff = abs(self.e_tot - self.kmf.e_tot)
+        tprint.print_msg("   E(RHF)        : %12.8f" % (self.kmf.e_tot))
+        tprint.print_msg("   E(RHF-DMET)   : %12.8f" % (self.e_tot))
+        tprint.print_msg("   |RHF - RHF(DMET)|          : %12.8f" % (diff))
+        if diff < error : 
+            tprint.print_msg("   HF-in-HF embedding is exact: True")
         else:
              raise Exception('WARNING: HF-in-HF embedding is not exact')                    
         
@@ -306,19 +311,19 @@ class pDMET:
         Do one-shot DMET, only the chemical potential is optimized
         '''
 
-        print("-- One-shot pDMET ... starting at %s" % (tunix.current_time()))    
+        tprint.print_msg("-- One-shot pDMET ... starting at %s" % (tunix.current_time()))    
         if self.solver == 'HF' and self.twoS == 0:
-            print("   Bath type: %s | QC Solver: %s" % (self.bathtype, 'RHF'))
+            tprint.print_msg("   Bath type: %s | QC Solver: %s" % (self.bathtype, 'RHF'))
         elif self.solver == 'HF' and self.twoS != 0:        
-            print("   Bath type: %s | QC Solver: %s | 2S = %d" % (self.bathtype, 'ROHF', self.twoS)) 
+            tprint.print_msg("   Bath type: %s | QC Solver: %s | 2S = %d" % (self.bathtype, 'ROHF', self.twoS)) 
         elif self.solver == 'RCCSD': 
-            print("   Bath type: %s | QC Solver: %s | 2S = %d" % (self.bathtype, self.solver, self.twoS))        
+            tprint.print_msg("   Bath type: %s | QC Solver: %s | 2S = %d" % (self.bathtype, self.solver, self.twoS))        
         else:      
-            print("   Bath type: %s | QC Solver: %s | 2S = %d | Nroots: %d" % (self.bathtype, self.solver, self.twoS, self.nroots))
+            tprint.print_msg("   Bath type: %s | QC Solver: %s | 2S = %d | Nroots: %d" % (self.bathtype, self.solver, self.twoS, self.nroots))
             
         if self.solver in ['CASCI','CASSCF','DMRG-CI','DMRG-SCF']:                
-            if self.qcsolver.cas != None: print("   Active space     :", self.qcsolver.cas)
-            if self.qcsolver.cas != None: print("   Active space MOs :", self.qcsolver.molist)            
+            if self.qcsolver.cas != None: tprint.print_msg("   Active space     :", self.qcsolver.cas)
+            if self.qcsolver.cas != None: tprint.print_msg("   Active space MOs :", self.qcsolver.molist)            
 
         self.cycle = 1       
         # Optimize the chemical potential          
@@ -327,10 +332,10 @@ class pDMET:
         self.baths = schmidt.baths(self.bath_truncation) 
         self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)       
       
-        print("   No. of electrons per cell : %12.8f" % (self.nelec_cell))
-        print("   Energy per cell           : %12.8f" % (self.e_tot))                          
-        print("-- One-shot pDMET ... finished at %s" % (tunix.current_time()))
-        print()            
+        tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_cell))
+        tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))                          
+        tprint.print_msg("-- One-shot pDMET ... finished at %s" % (tunix.current_time()))
+        tprint.print_msg()            
         
     def self_consistent(self, umat_kpt = False, loose = False):
         '''
@@ -339,18 +344,18 @@ class pDMET:
       
         if self.alt_CF == True: umat_kpt = False       
         if self.cell.spin !=0: raise Exception('sc-pDMET cannot be runned with ROHF bath')  
-        print("--------------------------------------------------------------------")
-        print("- SELF-CONSISTENT pDMET CALCULATION ... STARTING -")
-        print("  Convergence criteria")   
-        print("    Threshold :", self.SC_threshold) 
-        print("    Loose     :", loose)         
-        print("  Fitting 1-RDM of :", self.SC_CFtype)         
-        print("  k-dependent umat :", umat_kpt)           
-        print("  Kmesh symmetry   :", self.kmesh_sym)   
+        tprint.print_msg("--------------------------------------------------------------------")
+        tprint.print_msg("- SELF-CONSISTENT pDMET CALCULATION ... STARTING -")
+        tprint.print_msg("  Convergence criteria")   
+        tprint.print_msg("    Threshold :", self.SC_threshold) 
+        tprint.print_msg("    Loose     :", loose)         
+        tprint.print_msg("  Fitting 1-RDM of :", self.SC_CFtype)         
+        tprint.print_msg("  k-dependent umat :", umat_kpt)           
+        tprint.print_msg("  Kmesh symmetry   :", self.kmesh_sym)   
         if self.damping != 1.0:        
-            print("  Damping factor   :", self.damping)                
+            tprint.print_msg("  Damping factor   :", self.damping)                
         if self.DIIS:
-            print("  DIIS start at %dth cycle and using %d previous umats" % (self.DIIS_m, self.DIIS_n))            
+            tprint.print_msg("  DIIS start at %dth cycle and using %d previous umats" % (self.DIIS_m, self.DIIS_n))            
         
         self.umat_kpt = umat_kpt           
         uvec = np.zeros(self.Nterms, dtype=np.float64)
@@ -364,7 +369,7 @@ class pDMET:
         use_saved_uvec = False            
         if self.chkfile != None and self.restart == True:     
             if self.restart_success == True and self.uvec.size == uvec.size:     
-                print("  Restart from the saved uvec") 
+                tprint.print_msg("  Restart from the saved uvec") 
                 use_saved_uvec = True
                 
                 
@@ -379,23 +384,23 @@ class pDMET:
         rdm1 = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.doSCF, self.verbose)
         for cycle in range(self.SC_maxcycle):
             
-            print("- CYCLE %d:" % (cycle + 1))    
+            tprint.print_msg("- CYCLE %d:" % (cycle + 1))    
             umat_old = self.umat      
             rdm1_old = rdm1                  
             # Do one-shot with each uvec                  
             self.one_shot() 
             
-            print("   + Chemical potential        : %12.8f" % (self.chempot))
+            tprint.print_msg("   + Chemical potential        : %12.8f" % (self.chempot))
 
             # Optimize uvec to minimize the cost function
             if self.SC_method in ['BFGS', 'L-BFGS-B', 'CG', 'Newton-CG']:
                 result = optimize.minimize(self.CF, self.uvec, method = self.SC_method, jac = self.CF_grad, options = {'disp': False, 'gtol': 1e-12})
                 # result = optimize.minimize(self.CF, self.uvec, method = self.SC_method , options = {'disp': False, 'gtol': 1e-12})                
             else:
-                print("     WARNING:", self.SC_method, " is not supported")
+                tprint.print_msg("     WARNING:", self.SC_method, " is not supported")
                 
             if result.success == False:         
-                print("     WARNING: Correlation potential is not converged")    
+                tprint.print_msg("     WARNING: Correlation potential is not converged")    
                 
             self.uvec = result.x
             self.umat = self.uvec2umat(self.uvec)   
@@ -408,20 +413,20 @@ class pDMET:
 
             if self.verbose > 0 and self.umat_kpt == True:
                 uvec = self.uvec.reshape(self.nkpts_irred,-1)
-                print("   + Correlation potential vector    : ")
+                tprint.print_msg("   + Correlation potential vector    : ")
                 for k, kpt in enumerate(self.cell.get_scaled_kpts(self.kmf.kpts)):
-                    print('    %2d (%6.3f %6.3f %6.3f)   %s' % (k, kpt[0], kpt[1], kpt[2], uvec[self.sym_map[k]]))                
+                    tprint.print_msg('    %2d (%6.3f %6.3f %6.3f)   %s' % (k, kpt[0], kpt[1], kpt[2], uvec[self.sym_map[k]]))                
             elif self.verbose > 0:
-                print("   + Correlation potential vector    : ", self.uvec)
+                tprint.print_msg("   + Correlation potential vector    : ", self.uvec)
                     
             umat_diff = self.umat - umat_old          
             rdm_diff  = rdm1 - rdm1_old             
             norm_u    = weight * np.linalg.norm(umat_diff)             
             norm_rdm  = 1/self.nkpts * np.linalg.norm(rdm_diff) 
             
-            print("   + Cost function             : %20.15f" % (result.fun)) #%12.8
-            print("   + 2-norm of umat difference : %20.15f" % (norm_u)) 
-            print("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
+            tprint.print_msg("   + Cost function             : %20.15f" % (result.fun)) #%12.8
+            tprint.print_msg("   + 2-norm of umat difference : %20.15f" % (norm_u)) 
+            tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
             
             # Check convergence of 1-RDM            
             if (loose == False and norm_u <= self.SC_threshold): 
@@ -436,10 +441,10 @@ class pDMET:
                 
             self.uvec =  self.umat2uvec(self.umat)    
             
-            print()            
+            tprint.print_msg()            
             
-        print("- SELF-CONSISTENT pDMET CALCULATION ... DONE -")
-        print("--------------------------------------------------------------------")            
+        tprint.print_msg("- SELF-CONSISTENT pDMET CALCULATION ... DONE -")
+        tprint.print_msg("--------------------------------------------------------------------")            
         
     def nelec_costfunction(self, chempot):
         '''
@@ -696,42 +701,71 @@ class pDMET:
         return np.asarray(rdm_deriv_kpts)        
     
 ######################################## POST pDMET ANALYSIS ######################################## 
-
-    def get_bands(self, cell=None, dm_kpts=None, kpts=None, verbose=0):
+    def get_bands(self, cell=None, dm_kpts=None, kpts=None, verbose=0, max_cycle=200, debug=False):
         ''' Giving a correlated 1RDM, compute the umat that produces the 'closest' mean-field 1RDM
             then make a new kmf object using this 1RDM for pyWannier90 for band plotting purpose
         '''
-        
+        tprint.print_msg('------------- Computing band structure -------------')        
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kmf.kpts
         ao2loc = self.local.CO
         
         # Run SCF for the umat optimization
-        self.OEH_type = 'OEI'
-        self.doSCF = False
-        self.verbose = verbose
-        uvec = np.zeros_like(self.uvec)
-        if self.SC_method in ['BFGS', 'L-BFGS-B', 'CG', 'Newton-CG']:
-            result = optimize.minimize(self.CF, self.uvec, method = self.SC_method, options = {'disp': False, 'gtol': 1e-12})
-        self.uvec = result.x
-        self.umat = self.uvec2umat(self.uvec)
-        umat = self.umat - self.local.loc_actVHF_kpts
-        activeDMloc_kpts = self.local.construct_locOED_kpts(umat, 'OEI', doSCF=True, verbose=verbose)
-        print("   + Cost function             : %20.15f" % (result.fun))
-        print("DEBUG",self.umat)
-        activeDMao_kpts = np.asarray([reduce(np.dot,(ao2loc[kpt], activeDMloc_kpts[kpt],ao2loc[kpt].conj().T)) for kpt in range(self.nkpts)])
-         
+        SCF_converged = True
+        # activeDMloc_kpts = self.local.construct_locOED_kpts(self.umat, 'OEI', doSCF=False, verbose=verbose, max_cycle=max_cycle)
+        SCF_converged, activeDMloc_kpts = self.local.construct_locOED_kpts(self.umat, 'OEI', doSCF=True, verbose=verbose, max_cycle=max_cycle)
+        
+        if SCF_converged == True and debug == False:
+            activeDMao_kpts = np.asarray([reduce(np.dot,(ao2loc[kpt], activeDMloc_kpts[kpt],ao2loc[kpt].conj().T)) for kpt in range(self.nkpts)])
+             
+            # Total RDM1:
+            dm_kpts = self.local.coreDM_kpts + activeDMao_kpts
+            fock = self.kmf.get_hcore(cell, kpts) + self.kmf.get_veff(cell=cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
+            s1e = self.kmf.get_ovlp(cell, kpts)
+            mo_energy, mo_coeff = self.kmf.eig(fock, s1e)
+            kmf = self.kmf
+            kmf.mo_energy_kpts = mo_energy
+            kmf.mo_coeff_kpts = mo_coeff       
+            tprint.print_msg('---------- Computing band structure: Done ----------') 
+            return kmf
+        else:
+            tprint.print_msg('---------- Computing band structure: Not converged ----------') 
+            return 0
+            
+    def get_bands_dft(self, cell=None, XC='PBE', method=1, dm_kpts=None, kpts=None, verbose=0, max_cycle=1):
+        ''' Giving a correlated 1RDM, compute the umat that produces the 'closest' mean-field 1RDM
+            then make a new kmf object using this 1RDM for pyWannier90 for band plotting purpose
+        '''
+        tprint.print_msg('------------- Computing band structure -------------')        
+        if cell is None: cell = self.cell
+        if kpts is None: kpts = self.kmf.kpts
+        
+        # Method 1:
+        if method == 1:
+            full_1RDM = reduce(np.dot,(self.emb_orbs, self.emb_1RDM,self.emb_orbs.conj().T))          # transform RDM(emb) --> fullRDM
+            #full_1RDM += full_1RDM + self.core1RDM_local                                              # adding the core 1RDM
+            print("DEBUG", full_1RDM.sum(), self.local.to_Ls(self.kmf.make_rdm1()).sum())
+            full_1RDM_kpts = self.local.to_kspace(full_1RDM) # fullRDM -FT-> fullRDM(k) in local basis
+            ao2loc = self.local.CO
+            activeDMao_kpts = np.asarray([reduce(np.dot,(ao2loc[kpt], full_1RDM_kpts[kpt],ao2loc[kpt].conj().T)) for kpt in range(self.nkpts)])
+        elif method == 2:        
+            ao2loc = self.local.CO
+            activeDMloc_kpts = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.doSCF)
+            activeDMao_kpts = np.asarray([reduce(np.dot,(ao2loc[kpt], activeDMloc_kpts[kpt],ao2loc[kpt].conj().T)) for kpt in range(self.nkpts)])
+             
         # Total RDM1:
-        dm_kpts = self.local.coreDM_kpts + activeDMao_kpts
-        fock = self.kmf.get_hcore(cell, kpts) + self.kmf.get_veff(cell=cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
-        s1e = self.kmf.get_ovlp(cell, kpts)
-        mo_energy, mo_coeff = self.kmf.eig(fock, s1e)
-        kmf = self.kmf
-        kmf.mo_energy_kpts = mo_energy
-        kmf.mo_coeff_kpts = mo_coeff       
+        # from pyscf.pbc import scf
+        # dm_kpts = self.local.coreDM_kpts + activeDMao_kpts
+        # kmf = scf.KRHF(cell, kpts, exxdiv=None)
+        # kmf.xc = XC
+        # kmf.verbose = self.verbose
+        # kmf.max_cycle = max_cycle
+        # kmf.run(dm_kpts)   
+        # tprint.print_msg('---------- Computing band structure: Done ----------') 
         
-        return kmf
-        
+        return 1 # kmf
+
+            
     def get_bands_(self, kpts_band, cell=None, dm_kpts=None, kpts=None):
         '''Get energy bands at the given (arbitrary) 'band' k-points.
 

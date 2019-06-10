@@ -29,4 +29,4 @@ set(PYBIND11_CPP_STANDARD -std=c++11)
 
 # Creates a python module named "module_name"
 pybind11_add_module(libdmet MODULE libdmet.cpp)
-target_link_libraries(libdmet mkl_intel_lp64 mkl_sequential mkl_core)
+target_link_libraries(libdmet PUBLIC mkl_intel_lp64 mkl_sequential mkl_core)

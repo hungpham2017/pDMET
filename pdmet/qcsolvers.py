@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -67,7 +68,8 @@ class QCsolvers:
 		elif self.solver == 'FCI':          
 			self.fs = None
 			self.fs_conv_tol            = 1e-10   
-			self.fs_conv_tol_residual   = None           
+			self.fs_conv_tol_residual   = None  
+			self.verbose = verbose
 		elif self.solver == 'DMRG':
 			self.CheMPS2print   = False
 			self._D             = [200,500,1000,1000]
@@ -375,7 +377,8 @@ class QCsolvers:
 			self.fs = fci.FCI(self.mf, self.mf.mo_coeff)				
 		else:				 
 			self.fs = fci.addons.fix_spin_(fci.FCI(self.mf, self.mf.mo_coeff), self.e_shift)
-
+            
+		self.fs.verbose = self.verbose
 		self.fs.fs_conv_tol       = self.fs_conv_tol  
 		self.fs.conv_tol_residual = self.fs_conv_tol_residual             
 		self.fs.nroots = self.nroots       

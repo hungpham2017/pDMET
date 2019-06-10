@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -36,6 +37,7 @@ class WF:
         '''        
         
         # Collect cell and kmf object information
+        self.cell = cell
         self.spin = cell.spin        
         self.e_tot = kmf.e_tot
         self.w90 = w90
@@ -139,7 +141,7 @@ class WF:
             self.loc_actVHF_kpts  = savepdmet.loc_actVHF_kpts             
 
         
-    def construct_locOED_kpts(self, umat, OEH_type, doSCF=False, verbose=0):
+    def construct_locOED_kpts(self, umat, OEH_type, doSCF=False, verbose=0, max_cycle=200):
         '''
         Construct MOs/one-electron density matrix at each k-point in the local basis
         with a certain k-independent correlation potential umat
@@ -163,12 +165,16 @@ class WF:
                                                 for kpt in range(self.nkpts)], dtype=np.complex128)       
             
             if doSCF == True:
-                loc_OED = helper.KRHF(OEH_kpts, self.loc_actTEI_kpts, self.nactelecs, self.kpts, loc_OED, verbose=verbose)
+                SCF_converged, loc_OED = helper.KRHF(self.cell, OEH_kpts, self.loc_actTEI_kpts, self.nactelecs, self.kpts, loc_OED, verbose=verbose, max_cycle=max_cycle)
+                return SCF_converged, loc_OED
+            else:
+                return loc_OED
+           
         else:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
 
-        return loc_OED
+
         
     def construct_locOED_Ls(self, umat, OEH_type, doSCF=False, verbose=0):
         '''

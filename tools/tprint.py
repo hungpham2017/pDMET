@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -20,7 +21,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 
 import os, datetime
 from pDMET import pdmet
-
+import sys
             
 def print_header():  
     print("-----------------------------------------------------------------") 
@@ -30,3 +31,11 @@ def print_header():
     print("                       Email: pqh3.14@gmail.com")    
     print("                 Current time: %s" % (datetime.datetime.now().strftime("%Y/%m/%d - %H:%M:%S")))    
     print("-----------------------------------------------------------------")
+    sys.stdout.flush()
+    
+def print_msg(msg=None, *kargs):
+    if msg == None:
+        print() 
+    else:
+        print(msg, *kargs)  
+    sys.stdout.flush()

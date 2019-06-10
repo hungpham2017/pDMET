@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -90,7 +91,7 @@ def irred_kmesh(kpts):
     
     return kpts_irred, sym_counts, sym_map
     
-def KRHF(OEI, TEI, nelectron, kpts, DMguess, verbose=0):
+def KRHF(cell, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=200):
     '''KRHF wrapper to solve for 1RDM with a certain umat'''
 
     from pyscf.pbc import gto, scf   
@@ -106,19 +107,45 @@ def KRHF(OEI, TEI, nelectron, kpts, DMguess, verbose=0):
         return veff
 
     nao = OEI.shape[1]
-    cell = gto.Cell()
-    cell.atom.append(('He', (0.5, 0.5, 0.5)))
-    cell.a = np.eye(3)
+    cell.atom = [['He', (0.5, 0.5, 0.5)]]
     cell.incore_anyway = True
-    cell.build(verbose=verbose)
-    cell.mesh = [3,3,3] 
     cell.nelectron = nelectron
     kmf = scf.KRHF(cell, kpts, exxdiv=None)
     kmf.get_hcore = lambda *args: OEI
     kmf.get_ovlp = lambda *args: np.array([np.eye(nao)]*nkpts)
     kmf.get_veff = get_veff
-    kmf.run(DMguess)  
-    if kmf.converged == False: warnings.warn("SCF to get band structure is not converged")    
+    kmf.max_cycle = max_cycle
+    kmf.run(DMguess)   
     dms = kmf.make_rdm1()
+    
+    return kmf.converged, dms
+    
+def KRKS(cell, XC, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=1):
+    '''KRKS wrapper to solve for 1RDM with a certain umat'''
 
-    return dms
+    from pyscf.pbc import gto, scf   
+    import warnings
+    nkpts = kpts.shape[0]
+    def get_veff(cell=None, dm_kpts=None, *args):
+        '''Function to compute veff from ERI'''
+        delta = np.eye(nkpts) 
+        weight = 1/nkpts
+        vj = weight * np.einsum('ijkpqrs,ksr,ij->ipq', TEI,dm_kpts,delta,optimize = True)
+        vk = weight * np.einsum('ijkpqrs,jqr,jk->ips', TEI,dm_kpts,delta,optimize = True)       
+        veff = vj - 0.5*vk
+        return veff
+
+    nao = OEI.shape[1]
+    cell.atom = [['He', (0.5, 0.5, 0.5)]]
+    cell.incore_anyway = True
+    cell.nelectron = nelectron
+    kmf = scf.KRKS(cell, kpts, exxdiv=None)
+    kmf.xc = XC
+    kmf.get_hcore = lambda *args: OEI
+    kmf.get_ovlp = lambda *args: np.array([np.eye(nao)]*nkpts)
+    kmf.get_veff = get_veff
+    kmf.max_cycle = max_cycle
+    kmf.run(DMguess)   
+    dms = kmf.make_rdm1()
+    
+    return kmf.converged, dms
