@@ -91,7 +91,7 @@ def irred_kmesh(kpts):
     
     return kpts_irred, sym_counts, sym_map
     
-def KRHF(cell, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=200):
+def KRHF(cell, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=10):
     '''KRHF wrapper to solve for 1RDM with a certain umat'''
 
     from pyscf.pbc import gto, scf   
@@ -118,7 +118,7 @@ def KRHF(cell, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=200):
     kmf.run(DMguess)   
     dms = kmf.make_rdm1()
     
-    return kmf.converged, dms
+    return dms
     
 def KRKS(cell, XC, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=1):
     '''KRKS wrapper to solve for 1RDM with a certain umat'''
@@ -126,7 +126,7 @@ def KRKS(cell, XC, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=1):
     from pyscf.pbc import gto, scf   
     import warnings
     nkpts = kpts.shape[0]
-    def get_veff(cell=None, dm_kpts=None, *args):
+    def get_veff(dm_kpts=None, *args):
         '''Function to compute veff from ERI'''
         delta = np.eye(nkpts) 
         weight = 1/nkpts

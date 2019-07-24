@@ -34,7 +34,7 @@ def print_header():
     sys.stdout.flush()
     
 def print_msg(msg=None, *kargs):
-    if msg == None:
+    if msg is None:
         print() 
     else:
         print(msg, *kargs)  

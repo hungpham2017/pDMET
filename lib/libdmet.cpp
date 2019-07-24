@@ -735,6 +735,76 @@ py::array_t<std::complex<double>>  iFFT2e(py::array_t<int> tmap,
 }
 
 
+///--------------------------------------------------------------------------------------------------------------------
+py::array_t<double>  get_RDM_global(py::array_t<int> tmap,
+                                   int nLs,
+								   py::array_t<double, py::array::c_style | py::array::forcecast> RDM0)
+{
+	//inverse FT for one-electron matrix: from k-space to L-space
+	// Notation:
+    // i,j,k,l: k-point           ;  p,q,r,s: matrix indexes   
+    // a,b,c,d: lattice indexes   ;  u,v,w,x: lattice indexes of the output
+
+	py::buffer_info tmap_info = tmap.request();
+	const int * tmap_data = static_cast<int*>(tmap_info.ptr);    
+	py::buffer_info RDM0_info = RDM0.request();
+	const double * RDM0_data = static_cast<double*>(RDM0_info.ptr);
+	int nao = RDM0_info.shape[0];	    
+	int nao2 = nao*nao;	    
+	int size = nLs*nao;   
+	std::vector<double> output(size*size,0);
+    int a0 = nLs/2;
+    
+// For L0s
+#pragma omp parallel default(none) shared(a0,nao,size,RDM0_data,output)		
+{        
+#pragma omp for schedule(static) collapse(1)
+    for (int p = 0; p < nao; p++){	
+        int shift = a0*nao;
+        for (int q = 0; q < size; q++){                    
+            output[(p+shift)*size + q] = RDM0_data[p*size + q];
+        }
+    }				
+}
+    
+#pragma omp parallel default(none) shared(a0,nLs,nao,nao2,size,tmap_data,RDM0_data,output)		
+{        
+#pragma omp for schedule(static) collapse(4)
+	for (int a = 0; a < a0; a++){
+    for (int b = 0; b < nLs; b++){
+        for (int p = 0; p < nao; p++){	
+        for (int q = 0; q < nao; q++){
+            int a_ = nLs-1-a;
+            int b1 = tmap_data[a*nLs+b];
+            int b2 = tmap_data[a_*nLs+b];          
+            int u1 = a*nao + p;
+            int u2 = a_*nao + p;
+            int v = b*nao + q;	
+            int v1 = b1*nao + q;	
+            int v2 = b2*nao + q;	                    
+            output[u1*size + v] = RDM0_data[p*size + v1];
+            output[u2*size + v] = RDM0_data[p*size + v2];  
+        }
+        }				
+    }
+	}
+}
+
+	size_t dsize = size;   
+	py::buffer_info output_buf =
+		{
+			output.data(),
+			sizeof(double),
+			py::format_descriptor<double>::format(),
+			2,
+			{dsize, dsize},
+			{dsize*sizeof(double), sizeof(double)}
+		};
+		
+	return py::array_t<double> (output_buf);
+	
+}
+
 PYBIND11_MODULE(libdmet,m)
 {
 	m.doc() = "DMET library"; // optional
@@ -746,4 +816,5 @@ PYBIND11_MODULE(libdmet,m)
 	m.def("iFT1e_sparse", &iFT1e_sparse);
 	m.def("iFT2e", &iFT2e);	
 	m.def("iFFT2e", &iFFT2e);		
+	m.def("get_RDM_global", &get_RDM_global);
 }

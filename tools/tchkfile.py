@@ -209,7 +209,9 @@ def save_pdmet(pdmet, chkfile):
     if pdmet.kmesh_sym: kmesh_sym   = 'True'    
     emb_orbs      = pdmet.emb_orbs
     env_orbs      = pdmet.env_orbs
-    mf_mo         = pdmet.qcsolver.mf.mo_coeff  
+    mf_mo         = pdmet.qcsolver.mf.mo_coeff
+    core1RDMloc   = pdmet.core1RDM_local 
+    actv1RDMloc   = pdmet.emb_1RDM 
     
     if pdmet.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:
         mc_mo       = pdmet.qcsolver.mo
@@ -222,7 +224,9 @@ def save_pdmet(pdmet, chkfile):
                  'kmesh_sym'        : kmesh_sym,
                  'emb_orbs'         : emb_orbs,
                  'env_orbs'         : env_orbs,                 
-                 'mf_mo'            : mf_mo}
+                 'mf_mo'            : mf_mo,
+                 'core1RDMloc'      : core1RDMloc,
+                 'actv1RDMloc'      : actv1RDMloc}
                  
     if pdmet.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:
         pdmet_dic['mc_mo']      = mc_mo
@@ -236,7 +240,7 @@ def load_pdmet(chkfile):
     class fake_pdmet:
         def __init__(self, save_pdmet):
             self.solver      = None    
-            self.chempot     = False
+            self.chempot     = 0
             self.uvec        = False 
             self.umat        = False         
             self.kmesh_sym   = None 
@@ -255,6 +259,8 @@ def load_pdmet(chkfile):
                 self.emb_orbs    = save_pdmet['emb_orbs']              
                 self.env_orbs    = save_pdmet['env_orbs']                   
                 self.mf_mo       = save_pdmet['mf_mo'] 
+                self.core1RDMloc = save_pdmet['core1RDMloc']          
+                self.actv1RDMloc = save_pdmet['actv1RDMloc'] 
                 if self.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:              
                     self.mc_mo          = save_pdmet['mc_mo']                   
                     self.mc_mo_nat      = save_pdmet['mc_mo_nat']                     

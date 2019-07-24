@@ -69,6 +69,7 @@ class QCsolvers:
 			self.fs = None
 			self.fs_conv_tol            = 1e-10   
 			self.fs_conv_tol_residual   = None  
+			self.ci = None  
 			self.verbose = verbose
 		elif self.solver == 'DMRG':
 			self.CheMPS2print   = False
@@ -381,9 +382,13 @@ class QCsolvers:
 		self.fs.verbose = self.verbose
 		self.fs.fs_conv_tol       = self.fs_conv_tol  
 		self.fs.conv_tol_residual = self.fs_conv_tol_residual             
-		self.fs.nroots = self.nroots       
-		e, fcivec = self.fs.kernel()         
-
+		self.fs.nroots = self.nroots 
+		if self.ci is not None: 
+			ci0 = self.ci
+		else:
+			ci0 = None
+		e, fcivec = self.fs.kernel(ci0=ci0)         
+		self.ci = fcivec
 		
 		# Compute energy and RDM1	  
 		if self.nroots == 1:

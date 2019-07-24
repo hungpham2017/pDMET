@@ -71,7 +71,7 @@ class WF:
         # Construct the effective Hamiltonian due to the frozen core  | 
         #-------------------------------------------------------------    
         chkfile_exist = None     
-        if chkfile != None: chkfile_exist = tunix.check_exist(chkfile+'_int')
+        if chkfile != None: chkfile_exist = tunix.check_exist(chkfile)
         
         if chkfile_exist == None or chkfile_exist == False:
             self.CO, self.WFs = self.make_WFs(self.w90)    # WFs basis in k- and L- space
@@ -122,12 +122,12 @@ class WF:
                  
             # Save integrals to chkfile:            
             if chkfile_exist == False:
-                tchkfile.save_pdmet_int(self, chkfile+'_int')
+                tchkfile.save_pdmet_int(self, chkfile)
                 print('-> Chkfile saving ... done')                 
                         
         elif chkfile_exist == True:
-            print('-> Chkfile loading ...')
-            savepdmet = tchkfile.load_pdmet_int(chkfile+'_int')
+            print('-> Load the integral ...')
+            savepdmet = tchkfile.load_pdmet_int(chkfile)
             self.CO               = savepdmet.CO
             self.WFs              = savepdmet.WFs    
             self.e_core           = savepdmet.e_core
@@ -141,7 +141,7 @@ class WF:
             self.loc_actVHF_kpts  = savepdmet.loc_actVHF_kpts             
 
         
-    def construct_locOED_kpts(self, umat, OEH_type, doSCF=False, verbose=0, max_cycle=200):
+    def construct_locOED_kpts(self, umat, OEH_type, doSCF=False, verbose=0, max_cycle=20):
         '''
         Construct MOs/one-electron density matrix at each k-point in the local basis
         with a certain k-independent correlation potential umat
@@ -151,7 +151,9 @@ class WF:
         if OEH_type == 'OEI':
             OEH_kpts = self.loc_actOEI_kpts + umat
         elif OEH_type == 'FOCK':
-            OEH_kpts = self.loc_actFOCK_kpts + umat         
+            OEH_kpts = self.loc_actFOCK_kpts + umat  
+        elif OEH_type == 'projFOCK':
+            OEH_kpts = umat                 # umat here is simply the new FOCK from the correlated DM
         else:
             raise Exception('the current one-electron Hamiltonian type is not supported')
     
@@ -165,11 +167,9 @@ class WF:
                                                 for kpt in range(self.nkpts)], dtype=np.complex128)       
             
             if doSCF == True:
-                SCF_converged, loc_OED = helper.KRHF(self.cell, OEH_kpts, self.loc_actTEI_kpts, self.nactelecs, self.kpts, loc_OED, verbose=verbose, max_cycle=max_cycle)
-                return SCF_converged, loc_OED
-            else:
-                return loc_OED
-           
+                loc_OED = helper.KRHF(self.cell, self.loc_actOEI_kpts + umat, self.loc_actTEI_kpts, self.nactelecs, self.kpts, loc_OED, verbose=verbose, max_cycle=max_cycle)
+                
+            return loc_OED
         else:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
@@ -182,9 +182,26 @@ class WF:
         with a certain k-independent correlation potential umat
         '''    
     
-        loc_OED = self.construct_locOED_kpts(umat, OEH_type, doSCF=doSCF, verbose=verbose)
-        loc_OED_Ls = libdmet.iFFT1e(self.tmap, self.phase, loc_OED).real        
-        return loc_OED_Ls
+        loc_OED_kpts = self.construct_locOED_kpts(umat, OEH_type, doSCF=doSCF, verbose=verbose)
+        loc_OED_Ls = libdmet.iFFT1e(self.tmap, self.phase, loc_OED_kpts).real        
+        return loc_OED_kpts, loc_OED_Ls
+        
+    def construct_Fock_kpts(self, DMloc_kpts, local=True):
+        '''
+        Construct total Fock in the ao basis (local = False) or active Fock in the local basis (locala = True)
+        '''    
+        kpts = self.kmf.kpts
+        DMao_kpts = np.asarray([reduce(np.dot,(self.CO[kpt], DMloc_kpts[kpt],self.CO[kpt].conj().T)) for kpt in range(self.nkpts)])
+        if not local:
+            dm_kpts = self.coreDM_kpts + DMao_kpts
+            JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
+            return self.kmf.get_hcore(self.cell, kpts) + JKao
+        else:
+            dm_kpts = DMao_kpts
+            JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
+            JKloc = np.asarray([reduce(np.dot,(self.CO[kpt].conj().T, JKao[kpt],self.CO[kpt])) for kpt in range(self.nkpts)])
+            return self.loc_actOEI_kpts + JKloc
+        
         
     def dmet_oei(self, FBEorbs, Norb_in_imp):
         oei = reduce(np.dot,(FBEorbs[:,:Norb_in_imp].T, self.loc_actOEI_Ls, FBEorbs[:,:Norb_in_imp]))        
