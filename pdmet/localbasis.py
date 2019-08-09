@@ -248,11 +248,11 @@ class WF:
         '''
         
         CO = []
-        for k_id, kpt in enumerate(self.kpts):
-            mo_included = w90.mo_coeff_kpts[k_id][:,w90.band_included_list]
-            mo_in_window = w90.lwindow[k_id]         
-            C_opt = mo_included[:,mo_in_window].dot(w90.U_matrix_opt[k_id].T)              
-            CO.append(C_opt.dot(w90.U_matrix[k_id].T))        
+        for kpt in range(self.nkpts):
+            mo_included = w90.mo_coeff_kpts[kpt][:,w90.band_included_list]
+            mo_in_window = w90.lwindow[kpt]         
+            C_opt = mo_included[:,mo_in_window].dot(w90.U_matrix_opt[kpt].T)              
+            CO.append(C_opt.dot(w90.U_matrix[kpt].T))        
             
         CO = np.asarray(CO, dtype=np.complex128)
         WFs = libdmet.iFFT1e(self.tmap, self.phase, CO)

@@ -96,7 +96,7 @@ class pDMET:
         self.bath_truncation = False   # if self.truncate = a threshold, then a bath truncation scheme is used          
         self.chkfile         = None    # Save integrals in the WFs basis as well as chem potential and uvec
         self.restart         = False   # Run a calculation using saved chem potential and uvec             
-        self.cycle           = 1        
+        self._cycle           = 1        
         
     def initialize(self, ERI = None):
         '''
@@ -118,7 +118,8 @@ class pDMET:
             self.w90 = self.w90 
             
         assert (self.chkfile == None) or isinstance(self.chkfile,str)
-        self.nkpts = self.kmf.kpts.shape[0]   
+        self.kpts = self.kmf.kpts
+        self.nkpts = self.kpts.shape[0]   
         if ERI is not None: 
             chkfile = ERI
         else:
@@ -254,7 +255,7 @@ class pDMET:
         dmetCoreJK = self.local.dmet_corejk(FBEorbs, Norb_in_imp, core1RDM_local)
 
         # Solving the embedding problem with high level wfs
-        if self.cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" % (Nelec_in_imp, numImpOrbs, numBathOrbs))                        
+        if self._cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" % (Nelec_in_imp, numImpOrbs, numBathOrbs))                        
         DMguess = reduce(np.dot,(FBEorbs[:,:Norb_in_imp].T, self.locOED_Ls, FBEorbs[:,:Norb_in_imp]))    
         
         self.qcsolver.initialize(self.local.e_core, dmetOEI, dmetTEI, \
@@ -330,7 +331,7 @@ class pDMET:
             if self.qcsolver.cas != None: tprint.print_msg("   Active space     :", self.qcsolver.cas)
             if self.qcsolver.cas != None: tprint.print_msg("   Active space MOs :", self.qcsolver.molist)            
 
-        self.cycle = 1       
+        self._cycle = 1       
         # Optimize the chemical potential 
         if locOED_Ls is not None:
             self.locOED_Ls = locOED_Ls
@@ -338,14 +339,14 @@ class pDMET:
             self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type, self.doSCF, self.verbose)[1]        # get both MO coefficients and 1-RDM in the local basis     
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
-        self.chempot = optimize.newton(self.nelec_costfunction, self.chempot,tol=1.e-07)        
+        self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)        
         
         tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_cell))
         tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))                          
         tprint.print_msg("-- One-shot pDMET ... finished at %s" % (tunix.current_time()))
         tprint.print_msg()            
         
-    def self_consistent(self, umat_kpt = False, loose = False):
+    def self_consistent(self, umat_kpt = False):
         '''
         Do self-consistent pDMET
         '''    
@@ -355,8 +356,7 @@ class pDMET:
         tprint.print_msg("--------------------------------------------------------------------")
         tprint.print_msg("- SELF-CONSISTENT pDMET CALCULATION ... STARTING -")
         tprint.print_msg("  Convergence criteria")   
-        tprint.print_msg("    Threshold :", self.SC_threshold) 
-        tprint.print_msg("    Loose     :", loose)         
+        tprint.print_msg("    Threshold :", self.SC_threshold)     
         tprint.print_msg("  Fitting 1-RDM of :", self.SC_CFtype)         
         tprint.print_msg("  k-dependent umat :", umat_kpt)           
         tprint.print_msg("  Kmesh symmetry   :", self.kmesh_sym)   
@@ -436,10 +436,7 @@ class pDMET:
             tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
             
             # Check convergence of 1-RDM            
-            if (loose == False and norm_u <= self.SC_threshold): 
-                break
-            elif (loose == True and norm_rdm <= self.SC_threshold): 
-                break
+            if (norm_u <= self.SC_threshold): break
 
             if self.damping != 1.0:                
                 self.umat = (1.0 - self.damping)*umat_old + self.damping*self.umat               
@@ -540,8 +537,8 @@ class pDMET:
         Nelec_dmet = self.kernel(chempot)
         Nelec_target = self.Nelecs // self.nkpts   
         print ("     Cycle %2d. Chem potential: %12.8f | Elec/cell = %12.8f | <S^2> = %12.8f" % \
-                                                        (self.cycle, chempot, Nelec_dmet, self.qcsolver.SS))                                                                                
-        self.cycle += 1
+                                                        (self._cycle, chempot, Nelec_dmet, self.qcsolver.SS))                                                                                
+        self._cycle += 1
         if self.chkfile != None: tchkfile.save_pdmet(self, self.chkfile)
 
         return Nelec_dmet - Nelec_target
@@ -556,10 +553,10 @@ class pDMET:
         cost = np.power(rdm_diff, 2).sum()  
         return cost
         
-    def costfunction2(self, uvec):
+    def glob_costfunction(self, uvec):
         '''TODO write it 
         '''
-        rdm_diff = self.rdm_diff2(uvec)[0]
+        rdm_diff = self.glob_rdm_diff(uvec)[0]
         cost = np.power(rdm_diff, 2).sum()
         return cost / self.nkpts
         
@@ -578,12 +575,12 @@ class pDMET:
             CF_gradient[u] = np.sum(2 * rdm_diff * rdm_diff_gradient[u])
         return CF_gradient
         
-    def costfunction_gradient2(self, uvec):
+    def glob_costfunction_gradient(self, uvec):
         '''TODO
         '''
         uvec = uvec
-        rdm_diff, locOED_kpts = self.rdm_diff2(uvec)   
-        rdm_diff_gradient = self.rdm_diff_gradient2(uvec, locOED_kpts)  
+        rdm_diff, locOED_kpts = self.glob_rdm_diff(uvec)   
+        rdm_diff_gradient = self.glob_rdm_diff_gradient(uvec, locOED_kpts)  
         CF_gradient = np.zeros(self.kNterms)
         
         for u in range(self.kNterms):
@@ -598,7 +595,6 @@ class pDMET:
         Return:
             error            : an array of errors for the unit cell.
         '''
-        
         locOED_kpts, locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type, self.doSCF, self.verbose)
         if self.SC_CFtype in ['F', 'diagF']:        
             mf_1RDM = reduce(np.dot, (self.emb_orbs[:,:self.nImps].T, locOED, self.emb_orbs[:,:self.nImps]))
@@ -612,7 +608,7 @@ class pDMET:
         
         return error, locOED_kpts
 
-    def rdm_diff2(self, uvec):
+    def glob_rdm_diff(self, uvec):
         '''
         Calculating the different between mf-1RDM (transformed in schmidt basis) and correlated-1RDM for the unit cell
         Args:
@@ -620,11 +616,9 @@ class pDMET:
         Return:
             error            : an array of errors for the unit cell.
         '''
-        
         locOED_kpts, locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type, self.doSCF, self.verbose)
         corr_1RDM = self.construct_global_1RDM()
         error = locOED - corr_1RDM   
-        
         return error, locOED_kpts
         
     def rdm_diff_gradient(self, uvec, locOED_kpts):
@@ -662,7 +656,7 @@ class pDMET:
         
         return the_gradient
 
-    def rdm_diff_gradient2(self, uvec, locOED_kpts):
+    def glob_rdm_diff_gradient(self, uvec, locOED_kpts):
         '''
         Compute the rdm_diff gradient
         Args:
@@ -695,26 +689,29 @@ class pDMET:
         umat = self.uvec2umat(uvec)
         locOED_Ls = self.local.construct_locOED_Ls(umat, self.OEH_type, self.doSCF, self.verbose)[1]       
         if self.OEH_type == 'FOCK':
-            e_fun = np.trace(self.local.loc_actFOCK_Ls.dot(locOED_Ls))
+            OEH = self.local.loc_actFOCK_kpts #+umat
+            OEH = self.local.to_Ls(OEH)
+            e_fun = np.trace(OEH.dot(locOED_Ls))
         else: 
             print('Other type of 1e electron is not supported')
           
         umat_kpts = np.asarray([umat]*self.nkpts)  
         umat_Ls = self.local.to_Ls(umat_kpts) 
-        rdm_diff = self.rdm_diff2(uvec)[0]  
+        rdm_diff = self.glob_rdm_diff(uvec)[0]  
         e_cstr = np.sum(umat_Ls*rdm_diff)  
+
         return -e_fun-e_cstr   
         
     def alt_costfunction_gradient(self, uvec):
         '''
         TODO: DEBUGGING
         '''
-        rdm_diff = self.rdm_diff2(uvec)[0]
+        rdm_diff = self.glob_rdm_diff(uvec)[0]
         return -rdm_diff
         
 ######################################## USEFUL FUNCTION for pDMET class ######################################## 
 
-    def make_uvec(self, kpts):
+    def make_uvec(self, kpts=None):
         '''
         Make k-dependent uvec considering kmesh symmetry
         Attributes:
@@ -722,6 +719,7 @@ class pDMET:
             sym_id          : a list of symmetry label. k and -k should have the same label
             sym_map         : used to map the uvec (irreducible k-points) to umat (full k-points)        
         '''        
+        if kpts is None: kpts = self.kpts
         kpts = np.asarray(kpts)
         sym_id = np.asarray(range(self.nkpts))   
         if self.kmesh_sym == True:  
@@ -838,7 +836,6 @@ class pDMET:
         else:
             loc_actFOCK_kpts = self.local.loc_actFOCK_kpts + self.uvec2umat(uvec)
         
-        
         for kpt in range(self.nkpts):
             rdm_deriv = libdmet.rhf_response_c(self.nImps, self.Nterms, self.numPairs, self.H1start, self.H1row, self.H1col, loc_actFOCK_kpts[kpt])
             rdm_deriv_kpts.append(rdm_deriv)
@@ -854,12 +851,12 @@ class pDMET:
         DMtotal = DMcore + DMimp
         DMimp = DMtotal[nao*(nLs//2):(nao*(nLs//2)+nao),:]      # Only the impurity row is used
         DMglobal = libdmet.get_RDM_global(self.local.tmap,nLs,DMimp) 
-        DMglobal = 1/2*(DMglobal.T + DMglobal)          # make sure the global DM is hermitian
+        DMglobal = 0.5*(DMglobal.T + DMglobal)          # make sure the global DM is hermitian
         
         return DMglobal        
     
 ######################################## POST pDMET ANALYSIS ######################################## 
-    def get_bands(self, cell=None, dm_kpts=None, kpts=None, method='L-BFGS-B', umat_kpt=False):
+    def get_bands(self, cell=None, dm_kpts=None, kpts=None, alt_CF=False, method='L-BFGS-B', umat_kpt=False):
         ''' Embedding 1RDM is used to construct the global 1RDM.
             The 'closest' mean-field 1RDM to the global 1RDM is found by minizing the norm(D_global - D_mf) 
         '''
@@ -869,24 +866,41 @@ class pDMET:
         
         # Compute the total DM in the local basis
         self.umat_kpt = False
-        uvec = np.zeros(self.Nterms, dtype=np.float64) 
-        CF = self.costfunction2
-        CF_grad = self.costfunction_gradient2
-        result = optimize.minimize(CF, uvec, method = method, jac = CF_grad, options = {'disp': False, 'gtol': 1e-12})
+        if self.umat_kpt == True:        
+            self.kpts_irred, self.sym_counts, self.sym_map, uvec = self.make_uvec(self.kmf.kpts)
+            self.nkpts_irred = self.kpts_irred.size  
+            self.kNterms = self.nkpts_irred*self.Nterms 
+            weight  = 1/self.nkpts  
+        else:
+            uvec = np.zeros(self.Nterms, dtype=np.float64) 
+        if alt_CF:
+            CF = self.alt_costfunction
+            CF_grad = None #self.alt_costfunction_gradient
+        else:
+            CF = self.glob_costfunction
+            CF_grad = None  #self.glob_costfunction_gradient
+       
+        result = optimize.minimize(CF, uvec, method=method, jac=CF_grad, options={'disp': False, 'gtol': 1e-12})
         uvec = result.x
+        error = np.linalg.norm(self.glob_rdm_diff(uvec)[0]) / self.nkpts
         if result.success == False:         
             tprint.print_msg(" WARNING: Correlation potential is not converged")
-            tprint.print_msg(' Cost function: %20.15f' % (CF(uvec)))
+            tprint.print_msg(' Error: %20.15f' % (error))
         else:
-            tprint.print_msg(' Cost function: %20.15f' % (CF(uvec)))
+            tprint.print_msg(' Error: %20.15f' % (error))
         OEH_kpts = self.local.loc_actFOCK_kpts + self.uvec2umat(uvec)
         eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
         idx_kpts = eigvals.argsort()
         eigvals = np.asarray([eigvals[kpt][idx_kpts[kpt]] for kpt in range(self.nkpts)], dtype=np.float64)
         eigvecs = np.asarray([eigvecs[kpt][:,idx_kpts[kpt]] for kpt in range(self.nkpts)], dtype=np.complex128)
+        mo_coeff_kpts = np.asarray(self.kmf.mo_coeff_kpts)
+        mo_energy_kpts = np.asarray(self.kmf.mo_energy_kpts)
+        mo_coeff_kpts[:,:,self.w90.band_included_list] = np.einsum('kpq,kqr->kpr',self.local.CO,eigvecs)
+        mo_energy_kpts[:,self.w90.band_included_list] = eigvals
+            
         kmf = self.kmf
-        kmf.mo_energy_kpts = eigvals 
-        kmf.mo_coeff_kpts = eigvecs      
+        kmf.mo_energy_kpts = mo_energy_kpts
+        kmf.mo_coeff_kpts = mo_coeff_kpts     
         tprint.print_msg('---------- Computing band structure: Done ----------') 
         
         return kmf
@@ -895,6 +909,7 @@ class pDMET:
         ''' Embedding 1RDM is used to construct the global 1RDM.
             Then the bands are constructed by diagonalizing the modified FOCK operator
                 F_new = H_core + JK(D_global)
+            TODO: DEBUGGING
         '''
         tprint.print_msg('------------- Computing band structure -------------')        
         if cell is None: cell = self.cell
