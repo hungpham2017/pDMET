@@ -25,7 +25,8 @@ from functools import reduce
 import PyCheMPS2
 import pyscf
 from pyscf import gto, ao2mo, scf, cc, fci, mcscf, dmrgscf 
-    
+#from pyscf.shciscf import shci 
+
 class QCsolvers:
     def __init__(self, solver, twoS = 0, e_shift = None, nroots = 1, state_percent = None, verbose = 0, memory = 4000):
 
@@ -70,6 +71,13 @@ class QCsolvers:
             self.fs_conv_tol            = 1e-10   
             self.fs_conv_tol_residual   = None  
             self.ci = None  
+            self.verbose = verbose
+        elif self.solver == 'SHCI':          
+            self.mch = None
+            # self.fs_conv_tol            = 1e-10   
+            # self.fs_conv_tol_residual   = None  
+            self.ci = None  
+            self.mo_coeff = None
             self.verbose = verbose
         elif self.solver == 'DMRG':
             self.CheMPS2print   = False
@@ -427,6 +435,110 @@ class QCsolvers:
             for i, vec in enumerate(fcivec):
                 SS = self.fs.spin_square(vec, self.Norb, self.mol.nelec)[0]   
                 rdm1_mo , rdm2_mo = self.fs.make_rdm12(vec, self.Norb, self.mol.nelec)
+                # Transform rdm1 , rdm2 to local basis
+                rdm1 = np.einsum('ap,pq->aq', self.mf.mo_coeff, rdm1_mo)
+                rdm1 = np.einsum('bq,aq->ab', self.mf.mo_coeff, rdm1)     
+                rdm2 = np.einsum('ap,pqrs->aqrs', self.mf.mo_coeff, rdm2_mo)
+                rdm2 = np.einsum('bq,aqrs->abrs', self.mf.mo_coeff, rdm2)
+                rdm2 = np.einsum('cr,abrs->abcs', self.mf.mo_coeff, rdm2)
+                rdm2 = np.einsum('ds,abcs->abcd', self.mf.mo_coeff, rdm2)                    
+                Imp_Energy_state = 0.50  * np.einsum('ij,ij->',     rdm1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                              + 0.125 * np.einsum('ijkl,ijkl->', rdm2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                              + 0.125 * np.einsum('ijkl,ijkl->', rdm2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                              + 0.125 * np.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                              + 0.125 * np.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
+                Imp_e = self.kmf_ecore + Imp_Energy_state               
+                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, e[i], Imp_e, SS))                 
+                tot_SS += SS                              
+                RDM1.append(rdm1) 
+                e_cell.append(Imp_e)              
+            RDM1 = np.einsum('i,ijk->jk',self.state_percent, RDM1) 
+            e_cell = np.einsum('i,i->',self.state_percent, e_cell)                
+            self.SS = tot_SS/self.nroots  
+               
+        return (e_cell, RDM1)
+        
+########## SHCI solver ##########          
+    def SHCI(self):
+        '''
+        SHCI solver from PySCF
+        '''        
+
+        Nimp = self.Nimp
+        FOCKcopy = self.FOCK.copy()
+        
+        if (self.chempot != 0.0):
+            for orb in range(Nimp):
+                FOCKcopy[orb, orb] -= self.chempot    
+                
+        self.mol.nelectron = self.Nel
+        self.mf.__init__(self.mol)
+        self.mf.get_hcore = lambda *args: FOCKcopy
+        self.mf.get_ovlp = lambda *args: np.eye(self.Norb)
+        self.mf._eri = ao2mo.restore(8, self.TEI, self.Norb)
+        self.mf.scf(self.DMguess)       
+        DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+        if (self.mf.converged == False):
+            self.mf.newton().kernel(dm0=DMloc)
+            DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)        
+            
+        # Create and solve the SHCI object      
+        mch = shci.SHCISCF(self.mf, self.Norb, self.mol.nelectron)
+        mch.fcisolver.mpiprefix = ''
+        mch.fcisolver.nPTiter = 0 # Turn off perturbative calc.
+        mch.fcisolver.sweep_iter = [ 0, 3 ]
+        # Setting large epsilon1 thresholds highlights improvement from perturbation.
+        mch.fcisolver.sweep_epsilon = [ 1e-3, 0.5e-3 ]
+
+        # Run a single SHCI iteration with perturbative correction.
+        # mch.fcisolver.stochastic = False # Turns on deterministic PT calc.
+        # mch.fcisolver.epsilon2 = 1e-8
+        # shci.writeSHCIConfFile( mch.fcisolver, [self.mol.nelectron/2,self.mol.nelectron/2] , False )
+        # shci.executeSHCI( mch.fcisolver )
+
+        # Open and get the energy from the binary energy file shci.e.
+        # file1 = open(os.path.join(mch.fcisolver.runtimeDir, "%s/shci.e"%(mch.fcisolver.prefix)), "rb")
+        # format = ['d']*1
+        # format = ''.join(format)
+        # e_PT = struct.unpack(format, file1.read())
+
+        if self.ci is not None: 
+            ci0 = self.ci
+            mo_coeff = self.mo_coeff
+        else:
+            ci0 = None
+            mo_coeff = None
+        e_noPT, e_cas, fcivec, mo_coeff = mch.mc1step(mo_coeff=mo_coeff, ci0=ci0)[:4]        
+        self.ci = fcivec
+        self.mo_coeff = mo_coeff
+        
+        # Compute energy and RDM1      
+        if self.nroots == 1:
+            if mch.converged == False: print('           WARNING: The solver is not converged')
+            self.SS = mch.fcisolver.spin_square(fcivec, self.Norb, self.mol.nelec)[0]  
+            RDM1_mo , RDM2_mo = mch.fcisolver.make_rdm12(fcivec, self.Norb, self.mol.nelec)
+            # Transform RDM1 , RDM2 to local basis
+            RDM1 = np.einsum('ap,pq->aq', self.mf.mo_coeff, RDM1_mo)
+            RDM1 = np.einsum('bq,aq->ab', self.mf.mo_coeff, RDM1)     
+            RDM2 = np.einsum('ap,pqrs->aqrs', self.mf.mo_coeff, RDM2_mo)
+            RDM2 = np.einsum('bq,aqrs->abrs', self.mf.mo_coeff, RDM2)
+            RDM2 = np.einsum('cr,abrs->abcs', self.mf.mo_coeff, RDM2)
+            RDM2 = np.einsum('ds,abcs->abcd', self.mf.mo_coeff, RDM2)                
+            
+            ImpurityEnergy = 0.50  * np.einsum('ij,ij->',     RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                       + 0.125 * np.einsum('ijkl,ijkl->', RDM2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                       + 0.125 * np.einsum('ijkl,ijkl->', RDM2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                       + 0.125 * np.einsum('ijkl,ijkl->', RDM2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                       + 0.125 * np.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
+            e_cell = self.kmf_ecore + ImpurityEnergy         
+        else:
+            if mch.converged.any() == False: print('           WARNING: The solver is not converged')
+            tot_SS = 0 
+            RDM1 = []  
+            e_cell = []           
+            for i, vec in enumerate(fcivec):
+                SS = mch.fcisolver.spin_square(fcivec, self.Norb, self.mol.nelec)[0]   
+                rdm1_mo , rdm2_mo = mch.fcisolver.make_rdm12(fcivec, self.Norb, self.mol.nelec)
                 # Transform rdm1 , rdm2 to local basis
                 rdm1 = np.einsum('ap,pq->aq', self.mf.mo_coeff, rdm1_mo)
                 rdm1 = np.einsum('bq,aq->ab', self.mf.mo_coeff, rdm1)     

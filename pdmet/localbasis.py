@@ -152,7 +152,7 @@ class WF:
             OEH_kpts = self.loc_actOEI_kpts + umat
         elif OEH_type == 'FOCK':
             OEH_kpts = self.loc_actFOCK_kpts + umat  
-        elif OEH_type == 'projFOCK':
+        elif OEH_type == 'proj':
             OEH_kpts = umat                 # umat here is simply the new FOCK from the correlated DM
         else:
             raise Exception('the current one-electron Hamiltonian type is not supported')

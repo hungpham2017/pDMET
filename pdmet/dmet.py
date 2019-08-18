@@ -58,7 +58,7 @@ class pDMET:
         self.OEH_type = 'FOCK' # Options: FOCK/OEI        
         
         # QC Solver    
-        solver_list   = ['HF', 'CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF', 'FCI', 'DMRG', 'RCCSD']
+        solver_list   = ['HF', 'CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF', 'FCI', 'DMRG', 'RCCSD', 'SHCI']
         assert solver in solver_list
         self.solver   = solver        
         self.e_shift  = None         # Use to fix spin of the wrong state with FCI, hence CASCI/CASSCF solver
@@ -271,7 +271,9 @@ class pDMET:
         elif self.solver == 'DMRG':
             e_cell, RDM1 = self.qcsolver.DMRG()          
         elif self.solver == 'RCCSD':
-            e_cell, RDM1 = self.qcsolver.RCCSD()              
+            e_cell, RDM1 = self.qcsolver.RCCSD()  
+        elif self.solver == 'SHCI':
+            e_cell, RDM1 = self.qcsolver.SHCI()              
         
         if check == False:
             self.core1RDM_local = core1RDM_local
@@ -349,12 +351,13 @@ class pDMET:
     def self_consistent(self, umat_kpt = False):
         '''
         Do self-consistent pDMET
+        
         '''    
       
         if self.alt_CF == True: umat_kpt = False       
         if self.cell.spin !=0: raise Exception('sc-pDMET cannot be runned with ROHF bath')  
         tprint.print_msg("--------------------------------------------------------------------")
-        tprint.print_msg("- SELF-CONSISTENT pDMET CALCULATION ... STARTING -")
+        tprint.print_msg("- SELF-CONSISTENT DMET CALCULATION ... STARTING -")
         tprint.print_msg("  Convergence criteria")   
         tprint.print_msg("    Threshold :", self.SC_threshold)     
         tprint.print_msg("  Fitting 1-RDM of :", self.SC_CFtype)         
@@ -447,18 +450,19 @@ class pDMET:
             
             tprint.print_msg()            
             
-        tprint.print_msg("- SELF-CONSISTENT pDMET CALCULATION ... DONE -")
+        tprint.print_msg("- SELF-CONSISTENT DMET CALCULATION ... DONE -")
         tprint.print_msg("--------------------------------------------------------------------")            
         
-    def self_consistent_new(self):
+    def projected_DMET(self):
         '''
-        Do self-consistent pDMET
+        Do projected DMET
+        TODO: debug and DIIS
         '''    
       
         if self.alt_CF == True: umat_kpt = False       
         if self.cell.spin !=0: raise Exception('sc-pDMET cannot be runned with ROHF bath')  
         tprint.print_msg("--------------------------------------------------------------------")
-        tprint.print_msg("- SELF-CONSISTENT pDMET CALCULATION ... STARTING -")
+        tprint.print_msg("- SELF-CONSISTENT p-DMET CALCULATION ... STARTING -")
         tprint.print_msg("  Convergence criteria")   
         tprint.print_msg("    Threshold :", self.SC_threshold)    
         tprint.print_msg("  Fitting 1-RDM of :", self.SC_CFtype)         
@@ -471,48 +475,27 @@ class pDMET:
         #------------------------------------#
         #---- SELF-CONSISTENCY PROCEDURE ----#      
         #------------------------------------#    
-        def get_veff(dm_kpts, TEI):
-            '''Function to compute veff from ERI'''
-            nkpts = dm_kpts.shape[0]
-            delta = np.eye(nkpts) 
-            weight = 1/nkpts
-            vj = weight * np.einsum('ijkpqrs,ksr,ij->ipq', TEI,dm_kpts,delta,optimize = True)
-            vk = weight * np.einsum('ijkpqrs,jqr,jk->ips', TEI,dm_kpts,delta,optimize = True)       
-            veff = vj - 0.5*vk
-            return veff
-
         rdm1_kpts, rdm1_Ls = self.local.construct_locOED_Ls(0, 'FOCK')          # RDM1 from the orginal FOCK
         for cycle in range(self.SC_maxcycle):
             
-            tprint.print_msg("- CYCLE %d:" % (cycle + 1))    
-            rdm1_kpts_old = rdm1_kpts     
-            rdm1_Ls_old = rdm1_Ls  
+            tprint.print_msg("- CYCLE %d:" % (cycle + 1))      
+            rdm1_Ls_old = rdm1_Ls 
+            
             # Do one-shot with each uvec                  
             self.one_shot(rdm1_Ls) 
             tprint.print_msg("   + Chemical potential        : %12.8f" % (self.chempot))
             
-            # Construct new 1RDM in k-space
-            DMcore = self.core1RDM_local
-            DMact = reduce(np.dot,(self.emb_orbs,self.emb_1RDM,self.emb_orbs.T))
-            DMloc_total = DMcore + DMact
-            DMloc_kpts = self.local.to_kspace(DMloc_total)
-            JKloc = get_veff(DMloc_kpts, self.local.loc_actTEI_kpts)
-            fockloc = self.local.loc_actOEI_kpts + JKloc
-            rdm1_kpts, rdm1_Ls = self.local.construct_locOED_Ls(fockloc, 'projFOCK')
-            
-            # Construct new 1RDM in k-space
-            # DMcore = self.core1RDM_local
-            # DMact = reduce(np.dot,(self.emb_orbs,self.emb_1RDM,self.emb_orbs.T))
-            # DMloc_total = DMcore + DMact
-            # DMloc_kpts = self.local.to_kspace(DMloc_total)
-            # DMao_kpts = np.asarray([reduce(np.dot,(self.local.CO[kpt], DMloc_kpts[kpt],self.local.CO[kpt].conj().T)) for kpt in range(self.nkpts)])
-            # DMao_total = self.local.coreDM_kpts + DMao_kpts
-            # JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=DMao_total, kpts=self.kmf.kpts, kpts_band=self.kmf.kpts)
-            # fockao = self.kmf.get_hcore(self.cell, self.kmf.kpts) + JKao
-            # fockloc = self.local.to_local(fockao, self.local.CO)
-            # rdm1_kpts, rdm1_Ls = self.local.construct_locOED_Ls(fockloc, 'projFOCK') 
-            
-            rdm_diff  = rdm1_kpts - rdm1_kpts_old                      
+            # Construct new global 1RDM in k-space
+            DMglobal = self.construct_global_1RDM()
+            eigenvals, eigenvecs = np.linalg.eigh(DMglobal)
+            idx = eigenvals.argsort()
+            eigenvals = eigenvals[idx]
+            eigenvecs = eigenvecs[:,idx]
+            DM_low = 2 * eigenvecs[:,:(self.Nelecs//2)].dot(eigenvecs[:,:(self.Nelecs//2)].T)
+            DM_low_kpts = self.local.to_kspace(DM_low)
+            rdm1_kpts, rdm1_Ls = self.local.construct_locOED_Ls(DM_low_kpts, 'proj')
+
+            rdm_diff  = rdm1_Ls_old - rdm1_Ls            
             norm_rdm  = 1/self.nkpts * np.linalg.norm(rdm_diff) 
             tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
             
@@ -521,12 +504,12 @@ class pDMET:
                 break
 
             if self.damping != 1.0:                
-                rdm1_Ls = (1.0 - self.damping)*rdm1_Ls_old + self.damping*rdm1_Ls             
+                rdm1_Ls = rdm1_Ls_old - self.damping*rdm_diff            
             if self.DIIS == True:  
                 rdm1_Ls = self._diis.update(cycle, rdm1_Ls, rdm_diff)            
             tprint.print_msg()            
             
-        tprint.print_msg("- SELF-CONSISTENT pDMET CALCULATION ... DONE -")
+        tprint.print_msg("- SELF-CONSISTENT p-DMET CALCULATION ... DONE -")
         tprint.print_msg("--------------------------------------------------------------------")  
         
     def nelec_costfunction(self, chempot):
