@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -51,6 +52,7 @@ def save_kmf(kmf, chkfile):
         exxdiv = 'None'
     else:
         exxdiv      = kmf.exxdiv
+    max_memory      = kmf.max_memory
     e_tot           = kmf.e_tot
     kpts            = kmf.kpts
     mo_occ_kpts     = kmf.mo_occ_kpts
@@ -60,6 +62,7 @@ def save_kmf(kmf, chkfile):
     make_rdm1       = kmf.make_rdm1()
     
     kmf_dic = { 'exxdiv'            : exxdiv, 
+                'max_memory'        : max_memory,
                 'e_tot'             : e_tot,
                 'kpts'              : kpts,
                 'mo_occ_kpts'       : mo_occ_kpts,
@@ -70,7 +73,7 @@ def save_kmf(kmf, chkfile):
                 
     save(chkfile, 'scf', kmf_dic)
     
-def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False):
+def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False, max_memory=4000):
     '''
         Save a kmf object
     '''
@@ -78,7 +81,8 @@ def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False):
     save_kmf = load(chkfile, 'scf')
     
     class with_df:
-        def __init__(self, kmf):
+        def __init__(self, kmf, memory):
+            kmf.with_df.max_memory = memory
             self.ao2mo = lambda COijkl, kptijkl, compact: kmf.with_df.ao2mo(COijkl, kptijkl, compact)      
             
     class fake_kmf:
@@ -101,8 +105,12 @@ def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False):
             self.get_hcore  = lambda *arg, **kwargs: kmf.get_hcore(*arg, **kwargs)
             self.get_jk     = lambda *arg, **kwargs: kmf.get_jk(*arg, **kwargs)
             self.get_veff   = lambda *arg, **kwargs: kmf.get_veff(*arg, **kwargs)
-            self.get_bands  = lambda *arg, **kwargs: kmf.get_bands(*arg, **kwargs)                        
-            self.with_df    = with_df(kmf)
+            self.get_bands  = lambda *arg, **kwargs: kmf.get_bands(*arg, **kwargs) 
+            if hasattr(kmf,'max_memory'):
+                self.max_memory = kmf.max_memory
+            else:
+                self.max_memory = max_memory
+            self.with_df    = with_df(kmf, self.max_memory)
             
     final_kmf = fake_kmf(save_kmf)
     
@@ -201,7 +209,9 @@ def save_pdmet(pdmet, chkfile):
     if pdmet.kmesh_sym: kmesh_sym   = 'True'    
     emb_orbs      = pdmet.emb_orbs
     env_orbs      = pdmet.env_orbs
-    mf_mo         = pdmet.qcsolver.mf.mo_coeff  
+    mf_mo         = pdmet.qcsolver.mf.mo_coeff
+    core1RDMloc   = pdmet.core1RDM_local 
+    actv1RDMloc   = pdmet.emb_1RDM 
     
     if pdmet.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:
         mc_mo       = pdmet.qcsolver.mo
@@ -214,7 +224,9 @@ def save_pdmet(pdmet, chkfile):
                  'kmesh_sym'        : kmesh_sym,
                  'emb_orbs'         : emb_orbs,
                  'env_orbs'         : env_orbs,                 
-                 'mf_mo'            : mf_mo}
+                 'mf_mo'            : mf_mo,
+                 'core1RDMloc'      : core1RDMloc,
+                 'actv1RDMloc'      : actv1RDMloc}
                  
     if pdmet.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:
         pdmet_dic['mc_mo']      = mc_mo
@@ -228,7 +240,7 @@ def load_pdmet(chkfile):
     class fake_pdmet:
         def __init__(self, save_pdmet):
             self.solver      = None    
-            self.chempot     = False
+            self.chempot     = 0
             self.uvec        = False 
             self.umat        = False         
             self.kmesh_sym   = None 
@@ -247,6 +259,8 @@ def load_pdmet(chkfile):
                 self.emb_orbs    = save_pdmet['emb_orbs']              
                 self.env_orbs    = save_pdmet['env_orbs']                   
                 self.mf_mo       = save_pdmet['mf_mo'] 
+                self.core1RDMloc = save_pdmet['core1RDMloc']          
+                self.actv1RDMloc = save_pdmet['actv1RDMloc'] 
                 if self.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:              
                     self.mc_mo          = save_pdmet['mc_mo']                   
                     self.mc_mo_nat      = save_pdmet['mc_mo_nat']                     

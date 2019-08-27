@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u 
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
@@ -89,14 +90,14 @@ class DIIS:
         
         return new_umat
         
-    def update(self, cycle, umat, err_umat):
+    def update(self, cycle, umat, err_umat, projected=True):
         '''
         Return a new approximate vector or the same umat if cycle < m + n - 1
         '''	
         
         # Save the umat at the current cycle
         if cycle >= self.start_at - 1:
-            if err_umat.ndim == 2:         
+            if projected==False and err_umat.ndim == 2:         
                 err_umat = err_umat + np.zeros([self.nkpts,err_umat.shape[0],err_umat.shape[0]])
             self._umat.append(umat)
             self._err_umat.append(err_umat)                    

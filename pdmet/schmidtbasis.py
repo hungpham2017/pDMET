@@ -1,3 +1,4 @@
+#!/usr/bin/env python -u  
 '''
 pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
