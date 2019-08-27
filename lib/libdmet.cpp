@@ -120,6 +120,7 @@ py::array_t<double> rhf_response(const int Norb, const int Nterms, const int num
 	size_t pyNterms = Nterms;
 	size_t pyNorb = Norb;
 	size_t pyNorb2 = size;
+    
 	py::buffer_info rdm_deriv_buf =
 		{
 			rdm_deriv.data(),
@@ -620,7 +621,7 @@ py::array_t<std::complex<double>>  iFFT2e(py::array_t<int> tmap,
 	// Notation:
     // i,j,k,l: k-point           ;  p,q,r,s: matrix indexes   
     // a,b,c,d: lattice indexes   ;  u,v,w,x: lattice indexes of the output
-    
+
 	py::buffer_info tmap_info = tmap.request();
 	const int * tmap_data = static_cast<int*>(tmap_info.ptr);    
 	py::buffer_info phase_info = phase.request();
@@ -629,14 +630,13 @@ py::array_t<std::complex<double>>  iFFT2e(py::array_t<int> tmap,
 	const int * kconserv_data = static_cast<int*>(kconserv_info.ptr);    
 	py::buffer_info Mijk_info = Mijk.request();
 	const std::complex<double> * Mijk_data = static_cast<std::complex<double>*>(Mijk_info.ptr);
-
 	int nkpts = Mijk_info.shape[0];
 	int nLs = nkpts;        
 	int nao = Mijk_info.shape[3];    
 	int outsize = nLs*nao;
 	std::vector<std::complex<double>> output(outsize*outsize*outsize*outsize,0);
     int a0 = nLs/2;
-    
+
 // For L0s    
 #pragma omp parallel default(none) shared(a0,nLs,nkpts,nao,outsize,phase_data,kconserv_data,Mijk_data,output)
 { 
@@ -729,7 +729,7 @@ py::array_t<std::complex<double>>  iFFT2e(py::array_t<int> tmap,
 			{psize, psize, psize, psize},
 			{psize*psize*psize*sizeof(std::complex<double>), psize*psize*sizeof(std::complex<double>), psize*sizeof(std::complex<double>), sizeof(std::complex<double>)}
 		};
-		
+
 	return py::array_t<std::complex<double>> (output_buf);
 	
 }
