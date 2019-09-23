@@ -9,8 +9,8 @@ INCLUDE_DIRECTORIES(/home/gagliard/phamx494/anaconda/include)
 
 # Find the LAWrap for mkl_blas/lapack, pybind11
 find_package(LAWrap CONFIG REQUIRED)
-find_package(pybind11 CONFIG REQUIRED)
 message(STATUS "Found LAWrap: ${LAWrap_CONFIG}")
+find_package(pybind11 CONFIG REQUIRED)
 message(STATUS "Found pybind11: ${pybind11_CONFIG}")
 
 # Set python

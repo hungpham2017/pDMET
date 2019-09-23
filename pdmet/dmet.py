@@ -290,7 +290,7 @@ class pDMET:
         
         return self.nelec_cell
 
-    def check_exact(self, error = 1.e-8):
+    def check_exact(self, error = 1.e-7):
         '''
         Do one-shot DMET, only the chemical potential is optimized
         '''
@@ -348,7 +348,7 @@ class pDMET:
         tprint.print_msg("-- One-shot pDMET ... finished at %s" % (tunix.current_time()))
         tprint.print_msg()            
         
-    def self_consistent(self, umat_kpt = False):
+    def self_consistent(self, umat_kpt = False, get_band=False):
         '''
         Do self-consistent pDMET
         
@@ -438,6 +438,11 @@ class pDMET:
             tprint.print_msg("   + 2-norm of umat difference : %20.15f" % (norm_u)) 
             tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
             
+            # Export band structure at every cycle:
+            if get_band:
+                band = self.get_bands()
+                tchkfile.save_kmf(band, self.chkfile + '_band_cyc' + str(cycle + 1))
+                
             # Check convergence of 1-RDM            
             if (norm_u <= self.SC_threshold): break
 
@@ -829,10 +834,8 @@ class pDMET:
         ''' Construct the global 1RDM in the real-space, emb basis then transform it to the k-space, local basis'''
         nLs = self.nkpts
         nao = self.cell.nao
-        DMcore = self.core1RDM_local
         DMimp = reduce(np.dot, (self.emb_orbs,self.emb_1RDM,self.emb_orbs.T))
-        DMtotal = DMcore + DMimp
-        DMimp = DMtotal[nao*(nLs//2):(nao*(nLs//2)+nao),:]      # Only the impurity row is used
+        DMimp = DMimp[nao*(nLs//2):(nao*(nLs//2)+nao),:]      # Only the impurity row is used
         DMglobal = libdmet.get_RDM_global(self.local.tmap,nLs,DMimp) 
         DMglobal = 0.5*(DMglobal.T + DMglobal)          # make sure the global DM is hermitian
         
