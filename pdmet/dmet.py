@@ -106,12 +106,18 @@ class pDMET:
         
         # -------------------------------------------------        
         # General initialized attributes 
-        if self.kmf_chkfile != None:
+        if self.kmf_chkfile is not None:
             self.kmf = tchkfile.load_kmf(self.cell, self.kmf, self.w90.mp_grid_loc, self.kmf_chkfile, symmetrize = self.kmesh_sym, max_memory=self.max_memory)
         elif self.kmesh_sym == True:
             self.kmf = tchkfile.symmetrize_kmf(self.cell, self.kmf) 
             
-        if self.w90_chkfile != None:
+        if self.kmf.exxdiv is not None: 
+            raise Exception('The pDMET has not been developed for the RHF calculation with exxdiv is not None')
+            # TODO: if self.kmf.exxdiv != None, consider to run two SCF (one with and one without exx treatment
+            # if self.kmf.exxdiv == 'ewald': actOEI_kpts += self.exxdiv_ewald(cell) 
+            # to get the finite correction, see https://github.com/pyscf/pyscf/issues/250   
+            
+        if self.w90_chkfile is not None:
             self.w90 = tchkfile.load_w90(self.w90_chkfile)
         else:
             self.w90 = self.w90 
@@ -169,7 +175,7 @@ class pDMET:
          # -------------------------------------------------       
         # Load/initiate chem pot, uvec, umat    
         self.restart_success = False        
-        if self.chkfile != None and self.restart == True:
+        if self.chkfile is not None and self.restart == True:
             if tunix.check_exist(self.chkfile):
                 self.save_pdmet     = tchkfile.load_pdmet(self.chkfile) 
                 chk_sym             = self.save_pdmet.kmesh_sym                 
@@ -180,7 +186,7 @@ class pDMET:
                 self.emb_1RDM       = self.save_pdmet.actv1RDMloc
                 self.emb_orbs       = self.save_pdmet.emb_orbs
                 self.env_orbs       = self.save_pdmet.env_orbs
-                if chk_sym != None: self.umat_kpt  = chk_sym
+                if chk_sym is not None: self.umat_kpt  = chk_sym
                 tprint.print_msg("-> Load the pDMET chkfile")
                 self.restart_success = True                 
             else:
@@ -250,13 +256,15 @@ class pDMET:
         core1RDM_local = reduce(np.dot, (FBEorbs, np.diag(envOrbs_or_core_eigenvals), FBEorbs.T))                     
             
         # Transform the 1e/2e integrals and the JK core constribution to schmidt basis
-        dmetOEI  = self.local.dmet_oei(FBEorbs, Norb_in_imp)
-        dmetTEI  = self.local.dmet_tei(FBEorbs, Norb_in_imp)            
-        dmetCoreJK = self.local.dmet_corejk(FBEorbs, Norb_in_imp, core1RDM_local)
+        emb_orbs = FBEorbs[:,:Norb_in_imp]
+        ao2eo = self.local.get_ao2eo(emb_orbs, Norb_in_imp)
+        dmetOEI  = self.local.dmet_oei(ao2eo)
+        dmetTEI  = self.local.dmet_tei(ao2eo)            
+        dmetCoreJK = self.local.dmet_corejk(ao2eo, Norb_in_imp, core1RDM_local) # TODO: need to modify
 
         # Solving the embedding problem with high level wfs
         if self._cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" % (Nelec_in_imp, numImpOrbs, numBathOrbs))                        
-        DMguess = reduce(np.dot,(FBEorbs[:,:Norb_in_imp].T, self.locOED_Ls, FBEorbs[:,:Norb_in_imp]))    
+        DMguess = reduce(np.dot,(emb_orbs.T, self.locOED_Ls, emb_orbs))    
         
         self.qcsolver.initialize(self.local.e_core, dmetOEI, dmetTEI, \
                                 dmetCoreJK, DMguess, Norb_in_imp, Nelec_in_imp, numImpOrbs, chempot)
@@ -278,7 +286,7 @@ class pDMET:
         if check == False:
             self.core1RDM_local = core1RDM_local
             self.emb_1RDM = RDM1
-            self.emb_orbs = FBEorbs[:,:Norb_in_imp]
+            self.emb_orbs = emb_orbs
             self.env_orbs = FBEorbs[:,Norb_in_imp:]        
             self.nelec_cell = np.trace(RDM1[:numImpOrbs,:numImpOrbs])
     
@@ -330,8 +338,8 @@ class pDMET:
             tprint.print_msg("   Bath type: %s | QC Solver: %s | 2S = %d | Nroots: %d" % (self.bathtype, self.solver, self.twoS, self.nroots))
             
         if self.solver in ['CASCI','CASSCF','DMRG-CI','DMRG-SCF']:                
-            if self.qcsolver.cas != None: tprint.print_msg("   Active space     :", self.qcsolver.cas)
-            if self.qcsolver.cas != None: tprint.print_msg("   Active space MOs :", self.qcsolver.molist)            
+            if self.qcsolver.cas is not None: tprint.print_msg("   Active space     :", self.qcsolver.cas)
+            if self.qcsolver.cas is not None: tprint.print_msg("   Active space MOs :", self.qcsolver.molist)            
 
         self._cycle = 1       
         # Optimize the chemical potential 
@@ -378,7 +386,7 @@ class pDMET:
             weight  = 1/self.nkpts             
 
         use_saved_uvec = False            
-        if self.chkfile != None and self.restart == True:     
+        if self.chkfile is not None and self.restart == True:     
             if self.restart_success == True and self.uvec.size == uvec.size:     
                 tprint.print_msg("  Restart from the saved uvec") 
                 use_saved_uvec = True
@@ -527,7 +535,7 @@ class pDMET:
         print ("     Cycle %2d. Chem potential: %12.8f | Elec/cell = %12.8f | <S^2> = %12.8f" % \
                                                         (self._cycle, chempot, Nelec_dmet, self.qcsolver.SS))                                                                                
         self._cycle += 1
-        if self.chkfile != None: tchkfile.save_pdmet(self, self.chkfile)
+        if self.chkfile is not None: tchkfile.save_pdmet(self, self.chkfile)
 
         return Nelec_dmet - Nelec_target
 
@@ -921,7 +929,7 @@ class pDMET:
         
         return mo_energy, mo_coeff
         
-    def effHamiltonian(self, twoS = 0):        
+    def get_supercell_Hamiltonian(self, twoS = 0):        
         '''Make mf object of the effective Hamiltonian for a molecular solver.
         '''        
         Nimp = self.Nelecs
@@ -956,7 +964,7 @@ class pDMET:
             orb = 'emb', 'mf', 'mc', 'mc_nat'
         '''    
         
-        if self.chkfile != None and self.restart == True:
+        if self.chkfile is not None and self.restart == True:
             if self.restart_success != True:
                 raise Exception('Need to run at least one cycle to generate orbitals')
         else:

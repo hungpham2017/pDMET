@@ -28,7 +28,7 @@ from pDMET.pdmet import helper
 from pDMET.lib.build import libdmet
 
 class WF:
-    def __init__(self, cell, kmf, w90, chkfile = None):
+    def __init__(self, cell, kmf, w90, chkfile=None):
         '''
         TODO: need to be written
         Args:
@@ -47,15 +47,13 @@ class WF:
         self.nkpts = kmf.kpts.shape[0]    
         self.nao = cell.nao_nr()
         
-        # The k-point number has to be odd, since the fragment is assumed to be in the middle of the supercell
-        assert (np.asarray([kpt%2 == 0 for kpt in w90.mp_grid_loc]).all() == False)
-        nimgs = [kpt//2 for kpt in w90.mp_grid_loc]    
-        self.Ls = cell.get_lattice_Ls(nimgs)
-        self.nLs = self.Ls.shape[0]
-        self.phase = np.exp(1j*self.Ls.dot(self.kpts.T))
+        self.nLs, self.Ls, self.phase = self.get_phase(self.cell, self.w90, self.kpts)
         self.tmap = self.make_tmap(w90.mp_grid_loc)
-        assert self.nLs == self.nkpts
-        
+        self.ao2lo = self.get_WFs(self.w90)[0]    # Used to transform AO to local basis in k-space
+
+        #-------------------------------------------------------------
+        # Construct the effective Hamiltonian due to the frozen core  | 
+        #-------------------------------------------------------------  
         
         # Active part info
         self.active = np.zeros([cell.nao_nr()], dtype=int)
@@ -66,21 +64,14 @@ class WF:
         self.norbs = self.nkpts * self.nactorbs
         self.nactelecs = np.int32(cell.nelectron - np.sum(kmf.mo_occ_kpts[0][self.active==0]))        
         self.nelec = self.nkpts * self.nactelecs
-        
-        #-------------------------------------------------------------
-        # Construct the effective Hamiltonian due to the frozen core  | 
-        #-------------------------------------------------------------    
-        chkfile_exist = None     
-        if chkfile != None: chkfile_exist = tunix.check_exist(chkfile)
-        
-        
+
 
         # TODO: decide which part can be stored in a check file later
+        # chkfile_exist = None     
+        # if chkfile is not None: chkfile_exist = tunix.check_exist(chkfile)
         # if chkfile_exist == None or chkfile_exist == False:
-        
-        
-        self.ao2lo, self.WFs = self.make_WFs(self.w90)    # WFs basis in k- and L- space
-        print('-> 1e integrals ...') 
+       
+
         fullOEI_kpts = kmf.get_hcore()
         mo_kpts = kmf.mo_coeff_kpts
         coreDM_kpts = []
@@ -98,34 +89,20 @@ class WF:
                
         # 1e integral for the active part
         actOEI_kpts = fullOEI_kpts + coreJK_kpts     
-        if self.kmf.exxdiv != None: raise Exception('The pDMET has not been developed for the HF with exxdiv != None')
-
-        # TODO: if self.kmf.exxdiv != None, consider to run two SCF (one with and one without exx treatment
-        # if self.kmf.exxdiv == 'ewald': actOEI_kpts += self.exxdiv_ewald(cell) 
-        # to get the finite correction, see https://github.com/pyscf/pyscf/issues/250    
-        
         self.loc_actOEI_kpts = self.to_local(actOEI_kpts, self.ao2lo)
         self.loc_actOEI_Ls = self.to_Ls(self.loc_actOEI_kpts)
-        print('-> 1e integrals ... done')      
+  
         
         # 2e integral for the active part
-        print('-> 2e integrals ...') 
         from pyscf.pbc.tools import pbc as pbctools
-        kconserv = pbctools.get_kconserv(cell, self.kpts)
-        print(' Computing local k-space TEI')             
-        self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.ao2lo)
-        print(' Transforming k-space TEI to real space')              
+        kconserv = pbctools.get_kconserv(cell, self.kpts)   
+        self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.ao2lo)            
         self.loc_actTEI_Ls = self.to_Ls2e(self.loc_actTEI_kpts, kconserv) 
-        print('-> 2e integrals ... done') 
         
-        # Fock for the active part  
-        print('-> Fock matrix  ...')            
+        # Fock for the active part          
         fullfock_kpts = kmf.get_fock()            
-        self.loc_actFOCK_kpts = self.to_local(fullfock_kpts, self.ao2lo)
-        self.loc_actVHF_kpts = self.loc_actFOCK_kpts - self.loc_actOEI_kpts         
-        self.loc_actFOCK_Ls = self.to_Ls(self.loc_actFOCK_kpts)         
-        print('-> Fock matrix  ... done') 
-             
+        self.loc_actFOCK_kpts = self.to_local(fullfock_kpts, self.ao2lo)      
+            
         # Save integrals to chkfile:            
         # if chkfile_exist == False:
             # tchkfile.save_pdmet_int(self, chkfile)
@@ -194,7 +171,7 @@ class WF:
         Construct total Fock in the ao basis (local = False) or active Fock in the local basis (locala = True)
         '''    
         kpts = self.kmf.kpts
-        DMao_kpts = np.asarray([reduce(np.dot,(self.ao2lo[kpt], DMloc_kpts[kpt],self.ao2lo[kpt].conj().T)) for kpt in range(self.nkpts)])
+        DMao_kpts = np.asarray([reduce(np.dot,(self.ao2lo[kpt], DMloc_kpts[kpt],self.ao2lo[kpt].T.conj())) for kpt in range(self.nkpts)])
         if not local:
             dm_kpts = self.coreDM_kpts + DMao_kpts
             JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
@@ -202,24 +179,53 @@ class WF:
         else:
             dm_kpts = DMao_kpts
             JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
-            JKloc = np.asarray([reduce(np.dot,(self.ao2lo[kpt].conj().T, JKao[kpt],self.ao2lo[kpt])) for kpt in range(self.nkpts)])
+            JKloc = np.asarray([reduce(np.dot,(self.ao2lo[kpt].T.conj(), JKao[kpt],self.ao2lo[kpt])) for kpt in range(self.nkpts)])
             return self.loc_actOEI_kpts + JKloc
         
         
-    def dmet_oei(self, FBEorbs, Norb_in_imp):
-        oei = reduce(np.dot,(FBEorbs[:,:Norb_in_imp].T, self.loc_actOEI_Ls, FBEorbs[:,:Norb_in_imp]))        
+    def dmet_oei(self, ao2eo):
+        '''Get embedding OEI'''
+        oei = 0.0
+        for kpt in range(self.nkpts):
+            oei += reduce(np.dot,(ao2eo[kpt].T.conj(), self.loc_actOEI_kpts, ao2eo[kpt]))
+            
         return oei
 
-    def dmet_tei(self, FBEorbs, Norb_in_imp):
+    def dmet_tei(self, ao2eo):
+        '''Get embedding TEI or 2e ERI'''
+        ''' TODO: modify this to adapt it to GDF'''
         tei = ao2mo.incore.full(ao2mo.restore(8, self.loc_actTEI_Ls, self.norbs), FBEorbs[:,:Norb_in_imp], compact=False)
         tei = tei.reshape(Norb_in_imp, Norb_in_imp, Norb_in_imp, Norb_in_imp)
         return tei        
 
-    def dmet_corejk(self, FBEorbs, Norb_in_imp, core1RDM_loc):
+    def dmet_corejk(self, ao2eo):
+        '''Get embedding core JK'''
+        ''' TODO: modify this to adapt it to GDF
+        
+        
+        '''
+                
         J = np.einsum('pqrs,rs->pq', self.loc_actTEI_Ls, core1RDM_loc)
         K = np.einsum('prqs,rs->pq', self.loc_actTEI_Ls, core1RDM_loc)    
         JK = reduce(np.dot,(FBEorbs[:,:Norb_in_imp].T, J -0.5*K, FBEorbs[:,:Norb_in_imp]))        
         return JK
+        
+    def get_phase(self, cell=None, w90=None, kpts=None):
+        '''
+        Generate real space lattice vector corresponding to the kmesh the phase factors
+        '''
+        if w90 is not None : w90 = self.w90
+        if cell is not None: cell = self.cell
+        if kpts is not None: kpts = self.kpts
+        
+        kmesh = w90.mp_grid_loc
+        a = cell.lattice_vectors()
+        Ts = lib.cartesian_prod((np.arange(kmesh[0]), np.arange(kmesh[1]), np.arange(kmesh[2])))
+        Ls = np.dot(Ts, a)
+        nLs = Ls.shape[0]
+        phase = 1/nLs * np.exp(1j*self.Ls.dot(kpts.T))
+        
+        return nLs, Ls, phase
     
     def make_supcell(self, cell, nimgs):
         '''
@@ -245,7 +251,7 @@ class WF:
         supcell.verbose = cell.verbose
         return supcell        
 
-    def make_WFs(self, w90):
+    def get_WFs(self, w90):
         '''
         Compute the Wannier functions at the reference cell in the basis of local Gaussian
         '''
@@ -264,6 +270,16 @@ class WF:
         if WFs.imag.max() >= 1.e-7: raise Exception('WFs are not real')
         
         return ao2lo, WFs.real
+        
+    def get_ao2eo(self, emb_orbs, Norb_in_imp):
+        '''
+        Get the transformation matrix from AO to EO
+        '''
+        emb_orbs_Ls = emb_orbs.reshape(self.nLs, self.nactorbs, Norb_in_imp)
+        lo2eo = np.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs_Ls) 
+        ao2eo = np.einsum('kim, kmj -> kij', ao2lo, lo2eo) 
+        
+        return ao2eo
 
     def to_kspace(self, M):
         '''
@@ -291,14 +307,14 @@ class WF:
         '''
         return libdmet.iFFT2e(self.tmap, self.phase, kconserv, Mijk).real           
 
-    def to_local(self, Mk, CO):
+    def to_local(self, Mk, ao2lo):
         '''
         Transform an one-electron operator M_{pq}(k) in the ao basis to the local basis
         '''      
-        loc_Mk = np.asarray([reduce(np.dot, (CO[kpt].T.conj(), Mk[kpt], CO[kpt])) for kpt in range(self.nkpts)])
+        loc_Mk = np.asarray([reduce(np.dot, (ao2lo[kpt].T.conj(), Mk[kpt], ao2lo[kpt])) for kpt in range(self.nkpts)])
         return loc_Mk
 
-    def get_tei_kpts(self, kconserv, CO):
+    def get_tei_kpts(self, kconserv, ao2lo):
         '''
         Get TEI at sampled k-point g_pqrs^{ijkl}
         Note:
@@ -310,28 +326,15 @@ class WF:
             for j in range(self.nkpts):
                 for k in range(self.nkpts):            
                     l = kconserv[i,j,k]    
-                    ki, COi = self.kpts[i], CO[i]
-                    kj, COj = self.kpts[j], CO[j]
-                    kk, COk = self.kpts[k], CO[k]
-                    kl, COl = self.kpts[l], CO[l]                
+                    ki, COi = self.kpts[i], ao2lo[i]
+                    kj, COj = self.kpts[j], ao2lo[j]
+                    kk, COk = self.kpts[k], ao2lo[k]
+                    kl, COl = self.kpts[l], ao2lo[l]                
                     TEI = self.kmf.with_df.ao2mo([COi,COj,COk,COl], [ki,kj,kk,kl], compact = False)
                     TEIijk[i,j,k] = TEI.reshape(self.nactorbs,self.nactorbs,self.nactorbs,self.nactorbs)
                     
         return TEIijk
-        
-    def exxdiv_ewald(self, cell):
-        '''
-        The correction for The Exchange term when khf.exxdiv == 'ewald'
-        TODO: testing ...
-        '''
-        
-        from pyscf.pbc.df import df_jk      
-        vk_kpts = np.zeros([1, self.nkpts, self.nao, self.nao], dtype = np.complex128)  
-        dm_kpts = self.kmf.make_rdm1()
-        dms = df_jk._format_dms(dm_kpts, self.kpts)
-        df_jk._ewald_exxdiv_for_G0(cell, self.kpts, dms, vk_kpts, kpts_band = None)  
-                  
-        return -0.25*vk_kpts[0]    
+         
         
     def make_tmap(self, kmesh):  
         '''Exploring translational symmetry
