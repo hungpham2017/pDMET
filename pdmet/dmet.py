@@ -93,7 +93,7 @@ class pDMET:
         
         # Others
         self.bath_truncation = False   # if self.truncate = a threshold, then a bath truncation scheme is used          
-        self.chkfile         = None    # Save integrals in the WFs basis as well as chem potential and uvec
+        self.chkfile         = 'pdmet.chk'    # Save integrals in the WFs basis as well as chem potential and uvec
         self.restart         = False   # Run a calculation using saved chem potential and uvec             
         self._cycle           = 1        
         
@@ -109,7 +109,7 @@ class pDMET:
         if self.kmf_chkfile is not None:
             self.kmf = tchkfile.load_kmf(self.cell, self.kmf, self.w90.mp_grid_loc, self.kmf_chkfile, symmetrize = self.kmesh_sym, max_memory=self.max_memory)
         elif self.kmesh_sym == True:
-            self.kmf = tchkfile.symmetrize_kmf(self.cell, self.kmf) 
+            self.kmf = tchkfile.symmetrize_kmf(self.cell, self.kmf, self.w90.mp_grid_loc) 
             
         if self.kmf.exxdiv is not None: 
             raise Exception('The pDMET has not been developed for the RHF calculation with exxdiv is not None')
@@ -128,7 +128,7 @@ class pDMET:
         if ERI is not None: 
             chkfile = ERI
         else:
-            chkfile = self.chkfile + '_int'
+            chkfile = 'ERIs'
         self.local = localbasis.WF(self.cell, self.kmf, self.w90, chkfile = chkfile)  
         self.e_core = self.local.e_core   
         self.nImps = self.local.nactorbs
@@ -172,7 +172,7 @@ class pDMET:
         self.umat_kpt = False   
         self.mask = self.make_mask()   
 
-         # -------------------------------------------------       
+        # -------------------------------------------------       
         # Load/initiate chem pot, uvec, umat    
         self.restart_success = False        
         if self.chkfile is not None and self.restart == True:
@@ -192,10 +192,10 @@ class pDMET:
             else:
                 tprint.print_msg("-> Cannot load the pDMET chkfile") 
                 self.restart_success = False
-        if self.restart_success == False:
-            self.chempot = 0.0        
-            self.uvec = np.zeros(self.Nterms, dtype=np.float64)           
-            self.umat = self.uvec2umat(self.uvec)
+
+        self.chempot = 0.0
+        self.uvec = np.zeros(self.Nterms, dtype=np.float64)           
+        self.umat = self.uvec2umat(self.uvec)
             
         # Initializing Damping procedure and DIIS object          
         if self.DIIS == True:
@@ -260,7 +260,8 @@ class pDMET:
         ao2eo = self.local.get_ao2eo(emb_orbs, Norb_in_imp)
         dmetOEI  = self.local.dmet_oei(ao2eo)
         dmetTEI  = self.local.dmet_tei(ao2eo)            
-        dmetCoreJK = self.local.dmet_corejk(ao2eo, Norb_in_imp, core1RDM_local) # TODO: need to modify
+        dmet_1RDM =  reduce(np.dot, (emb_orbs.T, self.locOED_Ls, emb_orbs))  #TODO: need to be debugged
+        dmetCoreJK = self.local.dmet_corejk(ao2eo, dmetOEI, dmetTEI, dmet_1RDM) # TODO: need to modify
 
         # Solving the embedding problem with high level wfs
         if self._cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" % (Nelec_in_imp, numImpOrbs, numBathOrbs))                        
@@ -305,7 +306,7 @@ class pDMET:
         
         tprint.print_msg("--------------------------------------------------------------------")   
         
-        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, 'FOCK', False, self.verbose)[1]        
+        self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, 'FOCK', self.verbose)[1]        
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
         solver = self.solver
@@ -346,7 +347,7 @@ class pDMET:
         if locOED_Ls is not None:
             self.locOED_Ls = locOED_Ls
         else:
-            self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type self.verbose)[1]        # get both MO coefficients and 1-RDM in the local basis     
+            self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type, self.verbose)[1]        # get both MO coefficients and 1-RDM in the local basis     
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
         self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)        

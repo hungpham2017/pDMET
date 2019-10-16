@@ -24,7 +24,7 @@ from functools import reduce
 from pyscf.pbc.tools import pywannier90
 from pyscf import lib, ao2mo
 from pDMET.tools import tchkfile, tunix
-from pDMET.pdmet import helper
+from pDMET.pdmet import helper, df
 from pDMET.lib.build import libdmet
 
 class WF:
@@ -60,7 +60,7 @@ class WF:
 
         for orb in range(cell.nao_nr()):
             if (orb+1) not in w90.exclude_bands: self.active[orb] = 1
-        self.nactorbs = np.sum(self.active)    
+        self.nactorbs = np.sum(self.active)   
         self.norbs = self.nkpts * self.nactorbs
         self.nactelecs = np.int32(cell.nelectron - np.sum(kmf.mo_occ_kpts[0][self.active==0]))        
         self.nelec = self.nkpts * self.nactelecs
@@ -90,14 +90,14 @@ class WF:
         # 1e integral for the active part
         actOEI_kpts = fullOEI_kpts + coreJK_kpts     
         self.loc_actOEI_kpts = self.to_local(actOEI_kpts, self.ao2lo)
-        self.loc_actOEI_Ls = self.to_Ls(self.loc_actOEI_kpts)
+        # self.loc_actOEI_Ls = self.to_Ls(self.loc_actOEI_kpts)
   
         
         # 2e integral for the active part
         from pyscf.pbc.tools import pbc as pbctools
         kconserv = pbctools.get_kconserv(cell, self.kpts)   
-        self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.ao2lo)            
-        self.loc_actTEI_Ls = self.to_Ls2e(self.loc_actTEI_kpts, kconserv) 
+        # self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.ao2lo)            
+        # self.loc_actTEI_Ls = self.to_Ls2e(self.loc_actTEI_kpts, kconserv) 
         
         # Fock for the active part          
         fullfock_kpts = kmf.get_fock()            
@@ -124,7 +124,7 @@ class WF:
             # self.loc_actVHF_kpts  = savepdmet.loc_actVHF_kpts             
 
         
-    def construct_locOED_kpts(self, umat, OEH_type, verbose=0, max_cycle=20):
+    def construct_locOED_kpts(self, umat, OEH_type, verbose=0):
         '''
         Construct MOs/one-electron density matrix at each k-point in the local basis
         with a certain k-independent correlation potential umat
@@ -187,43 +187,48 @@ class WF:
         '''Get embedding OEI'''
         oei = 0.0
         for kpt in range(self.nkpts):
-            oei += reduce(np.dot,(ao2eo[kpt].T.conj(), self.loc_actOEI_kpts, ao2eo[kpt]))
-            
+            oei += reduce(np.dot,(ao2eo[kpt].T.conj(), self.loc_actOEI_kpts[kpt], ao2eo[kpt]))
         return oei
 
     def dmet_tei(self, ao2eo):
         '''Get embedding TEI or 2e ERI'''
         ''' TODO: modify this to adapt it to GDF'''
-        tei = ao2mo.incore.full(ao2mo.restore(8, self.loc_actTEI_Ls, self.norbs), FBEorbs[:,:Norb_in_imp], compact=False)
-        tei = tei.reshape(Norb_in_imp, Norb_in_imp, Norb_in_imp, Norb_in_imp)
+        mydf = self.kmf.with_df   
+        tei = df.get_emb_ERIs(self.cell, mydf, ao2eo)
         return tei        
 
-    def dmet_corejk(self, ao2eo):
+    def dmet_fock(self, ao2eo):
+        '''Get embedding FOCK used to get core JK in embedding space without explicitly computing core JK in local space, need more efficient algorithm'''
+        fock = 0.0
+        for kpt in range(self.nkpts):
+            fock += reduce(np.dot,(ao2eo[kpt].T.conj(), self.loc_actFOCK_kpts[kpt], ao2eo[kpt]))
+            
+        return fock
+
+    def dmet_corejk(self, ao2eo, dmetOEI, dmetTEI, dmet1RDM):
         '''Get embedding core JK'''
-        ''' TODO: modify this to adapt it to GDF
-        
-        
+        ''' TODO: need to debug and make more efficient
         '''
-                
-        J = np.einsum('pqrs,rs->pq', self.loc_actTEI_Ls, core1RDM_loc)
-        K = np.einsum('prqs,rs->pq', self.loc_actTEI_Ls, core1RDM_loc)    
-        JK = reduce(np.dot,(FBEorbs[:,:Norb_in_imp].T, J -0.5*K, FBEorbs[:,:Norb_in_imp]))        
-        return JK
+        dmetFock = self.dmet_fock(ao2eo)
+        J = np.einsum('pqrs,rs->pq', dmetTEI, dmet1RDM)
+        K = np.einsum('prqs,rs->pq', dmetTEI, dmet1RDM) 
+        dmetJK = dmetFock - dmetOEI - (J - 0.5*K)   
+        return dmetJK
         
     def get_phase(self, cell=None, w90=None, kpts=None):
         '''
         Generate real space lattice vector corresponding to the kmesh the phase factors
         '''
-        if w90 is not None : w90 = self.w90
-        if cell is not None: cell = self.cell
-        if kpts is not None: kpts = self.kpts
+        if w90 is None : w90 = self.w90
+        if cell is None: cell = self.cell
+        if kpts is None: kpts = self.kpts
         
         kmesh = w90.mp_grid_loc
         a = cell.lattice_vectors()
         Ts = lib.cartesian_prod((np.arange(kmesh[0]), np.arange(kmesh[1]), np.arange(kmesh[2])))
         Ls = np.dot(Ts, a)
         nLs = Ls.shape[0]
-        phase = 1/nLs * np.exp(1j*self.Ls.dot(kpts.T))
+        phase = 1/nLs * np.exp(1j*Ls.dot(kpts.T))
         
         return nLs, Ls, phase
     
@@ -264,10 +269,16 @@ class WF:
             ao2lo.append(C_opt.dot(w90.U_matrix[kpt].T))        
             
         ao2lo = np.asarray(ao2lo, dtype=np.complex128)
-        WFs = libdmet.iFFT1e(self.tmap, self.phase, ao2lo)
+        
+        #TODO: for debugging purposes, need to be removed
+        WFs = 0.0
+        for kpt in range(self.nkpts):
+            WFs += ao2lo[kpt]
+            
+        #WFs = libdmet.iFFT1e(self.tmap, self.phase, ao2lo)
         
         # Check of WFs are real     
-        if WFs.imag.max() >= 1.e-7: raise Exception('WFs are not real')
+        assert WFs.imag.max() < 1.e-7, 'WFs are not real'
         
         return ao2lo, WFs.real
         
@@ -277,8 +288,7 @@ class WF:
         '''
         emb_orbs_Ls = emb_orbs.reshape(self.nLs, self.nactorbs, Norb_in_imp)
         lo2eo = np.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs_Ls) 
-        ao2eo = np.einsum('kim, kmj -> kij', ao2lo, lo2eo) 
-        
+        ao2eo = np.einsum('kim, kmj -> kij', self.ao2lo, lo2eo) 
         return ao2eo
 
     def to_kspace(self, M):
