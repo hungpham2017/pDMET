@@ -30,7 +30,7 @@ from pDMET.lib.build import libdmet
 class WF:
     def __init__(self, cell, kmf, w90, chkfile = None):
         '''
-        Prepare the Wannier functions, transform OEI and TEI to the real-space representation
+        TODO: need to be written
         Args:
             kmf        : a k-dependent mean-field wf
             w90        : a converged wannier90 object
@@ -73,75 +73,81 @@ class WF:
         chkfile_exist = None     
         if chkfile != None: chkfile_exist = tunix.check_exist(chkfile)
         
-        if chkfile_exist == None or chkfile_exist == False:
-            self.CO, self.WFs = self.make_WFs(self.w90)    # WFs basis in k- and L- space
-            print('-> 1e integrals ...') 
-            fullOEI_kpts = kmf.get_hcore()
-            mo_kpts = kmf.mo_coeff_kpts
-            coreDM_kpts = []
-            for kpt in range(self.nkpts):
-                coreDMmo  = kmf.mo_occ_kpts[kpt].copy()
-                coreDMmo[self.active==1] = 0
-                coreDMao = reduce(np.dot, (mo_kpts[kpt], np.diag(coreDMmo), mo_kpts[kpt].T.conj()))
-                coreDM_kpts.append(coreDMao)
         
-            self.coreDM_kpts = np.asarray(coreDM_kpts, dtype=np.complex128)
-            coreJK_kpts = kmf.get_veff(cell, self.coreDM_kpts, hermi = 1, kpts = self.kpts, kpts_band = None)
+
+        # TODO: decide which part can be stored in a check file later
+        # if chkfile_exist == None or chkfile_exist == False:
         
-            # Core energy from the frozen orbitals
-            self.e_core = cell.energy_nuc() + 1./self.nkpts *np.einsum('kij,kji->', fullOEI_kpts + 0.5*coreJK_kpts, self.coreDM_kpts).real        
-                   
-            # 1e integral for the active part
-            actOEI_kpts = fullOEI_kpts + coreJK_kpts     
-            if self.kmf.exxdiv != None: raise Exception('The pDMET has not been developed for the HF with exxdiv != None')  
-            # if self.kmf.exxdiv == 'ewald': actOEI_kpts += self.exxdiv_ewald(cell) 
-            # TODO: if self.kmf.exxdiv != None, consider to run two SCF (one with and one without exx treatment
-            # to get the finite correction, see https://github.com/pyscf/pyscf/issues/250    
-            
-            self.loc_actOEI_kpts = self.to_local(actOEI_kpts, self.CO)
-            self.loc_actOEI_Ls = self.to_Ls(self.loc_actOEI_kpts)
-            print('-> 1e integrals ... done')      
-            
-            # 2e integral for the active part
-            print('-> 2e integrals ...') 
-            from pyscf.pbc.tools import pbc as pbctools
-            kconserv = pbctools.get_kconserv(cell, self.kpts)
-            print(' Computing local k-space TEI')             
-            self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.CO)
-            print(' Transforming k-space TEI to real space')              
-            self.loc_actTEI_Ls = self.to_Ls2e(self.loc_actTEI_kpts, kconserv) 
-            print('-> 2e integrals ... done') 
-            
-            # Fock for the active part  
-            print('-> Fock matrix  ...')            
-            fullfock_kpts = kmf.get_fock()            
-            self.loc_actFOCK_kpts = self.to_local(fullfock_kpts, self.CO)
-            self.loc_actVHF_kpts = self.loc_actFOCK_kpts - self.loc_actOEI_kpts         
-            self.loc_actFOCK_Ls = self.to_Ls(self.loc_actFOCK_kpts)         
-            print('-> Fock matrix  ... done') 
-                 
-            # Save integrals to chkfile:            
-            if chkfile_exist == False:
-                tchkfile.save_pdmet_int(self, chkfile)
-                print('-> Chkfile saving ... done')                 
+        
+        self.ao2lo, self.WFs = self.make_WFs(self.w90)    # WFs basis in k- and L- space
+        print('-> 1e integrals ...') 
+        fullOEI_kpts = kmf.get_hcore()
+        mo_kpts = kmf.mo_coeff_kpts
+        coreDM_kpts = []
+        for kpt in range(self.nkpts):
+            coreDMmo  = kmf.mo_occ_kpts[kpt].copy()
+            coreDMmo[self.active==1] = 0
+            coreDMao = reduce(np.dot, (mo_kpts[kpt], np.diag(coreDMmo), mo_kpts[kpt].T.conj()))
+            coreDM_kpts.append(coreDMao)
+    
+        self.coreDM_kpts = np.asarray(coreDM_kpts, dtype=np.complex128)
+        coreJK_kpts = kmf.get_veff(cell, self.coreDM_kpts, hermi = 1, kpts = self.kpts, kpts_band = None)
+    
+        # Core energy from the frozen orbitals
+        self.e_core = cell.energy_nuc() + 1./self.nkpts *np.einsum('kij,kji->', fullOEI_kpts + 0.5*coreJK_kpts, self.coreDM_kpts).real        
+               
+        # 1e integral for the active part
+        actOEI_kpts = fullOEI_kpts + coreJK_kpts     
+        if self.kmf.exxdiv != None: raise Exception('The pDMET has not been developed for the HF with exxdiv != None')
+
+        # TODO: if self.kmf.exxdiv != None, consider to run two SCF (one with and one without exx treatment
+        # if self.kmf.exxdiv == 'ewald': actOEI_kpts += self.exxdiv_ewald(cell) 
+        # to get the finite correction, see https://github.com/pyscf/pyscf/issues/250    
+        
+        self.loc_actOEI_kpts = self.to_local(actOEI_kpts, self.ao2lo)
+        self.loc_actOEI_Ls = self.to_Ls(self.loc_actOEI_kpts)
+        print('-> 1e integrals ... done')      
+        
+        # 2e integral for the active part
+        print('-> 2e integrals ...') 
+        from pyscf.pbc.tools import pbc as pbctools
+        kconserv = pbctools.get_kconserv(cell, self.kpts)
+        print(' Computing local k-space TEI')             
+        self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.ao2lo)
+        print(' Transforming k-space TEI to real space')              
+        self.loc_actTEI_Ls = self.to_Ls2e(self.loc_actTEI_kpts, kconserv) 
+        print('-> 2e integrals ... done') 
+        
+        # Fock for the active part  
+        print('-> Fock matrix  ...')            
+        fullfock_kpts = kmf.get_fock()            
+        self.loc_actFOCK_kpts = self.to_local(fullfock_kpts, self.ao2lo)
+        self.loc_actVHF_kpts = self.loc_actFOCK_kpts - self.loc_actOEI_kpts         
+        self.loc_actFOCK_Ls = self.to_Ls(self.loc_actFOCK_kpts)         
+        print('-> Fock matrix  ... done') 
+             
+        # Save integrals to chkfile:            
+        # if chkfile_exist == False:
+            # tchkfile.save_pdmet_int(self, chkfile)
+            # print('-> Chkfile saving ... done')                 
                         
-        elif chkfile_exist == True:
-            print('-> Load the integral ...')
-            savepdmet = tchkfile.load_pdmet_int(chkfile)
-            self.CO               = savepdmet.CO
-            self.WFs              = savepdmet.WFs    
-            self.e_core           = savepdmet.e_core
-            self.coreDM_kpts      = savepdmet.coreDM_kpts
-            self.loc_actOEI_kpts  = savepdmet.loc_actOEI_kpts
-            self.loc_actOEI_Ls    = savepdmet.loc_actOEI_Ls
-            self.loc_actTEI_kpts  = savepdmet.loc_actTEI_kpts   
-            self.loc_actTEI_Ls    = savepdmet.loc_actTEI_Ls
-            self.loc_actFOCK_kpts = savepdmet.loc_actFOCK_kpts    
-            self.loc_actFOCK_Ls   = savepdmet.loc_actFOCK_Ls         
-            self.loc_actVHF_kpts  = savepdmet.loc_actVHF_kpts             
+        # elif chkfile_exist == True:
+            # print('-> Load the integral ...')
+            # savepdmet = tchkfile.load_pdmet_int(chkfile)
+            # self.ao2lo               = savepdmet.CO
+            # self.WFs              = savepdmet.WFs    
+            # self.e_core           = savepdmet.e_core
+            # self.coreDM_kpts      = savepdmet.coreDM_kpts
+            # self.loc_actOEI_kpts  = savepdmet.loc_actOEI_kpts
+            # self.loc_actOEI_Ls    = savepdmet.loc_actOEI_Ls
+            # self.loc_actTEI_kpts  = savepdmet.loc_actTEI_kpts   
+            # self.loc_actTEI_Ls    = savepdmet.loc_actTEI_Ls
+            # self.loc_actFOCK_kpts = savepdmet.loc_actFOCK_kpts    
+            # self.loc_actFOCK_Ls   = savepdmet.loc_actFOCK_Ls         
+            # self.loc_actVHF_kpts  = savepdmet.loc_actVHF_kpts             
 
         
-    def construct_locOED_kpts(self, umat, OEH_type, doSCF=False, verbose=0, max_cycle=20):
+    def construct_locOED_kpts(self, umat, OEH_type, verbose=0, max_cycle=20):
         '''
         Construct MOs/one-electron density matrix at each k-point in the local basis
         with a certain k-independent correlation potential umat
@@ -166,9 +172,6 @@ class WF:
             loc_OED = np.asarray([np.dot(eigvecs[kpt][:,mo_occ[kpt]>0]*mo_occ[kpt][mo_occ[kpt]>0], eigvecs[kpt][:,mo_occ[kpt]>0].T.conj())
                                                 for kpt in range(self.nkpts)], dtype=np.complex128)       
             
-            if doSCF == True:
-                loc_OED = helper.KRHF(self.cell, self.loc_actOEI_kpts + umat, self.loc_actTEI_kpts, self.nactelecs, self.kpts, loc_OED, verbose=verbose, max_cycle=max_cycle)
-                
             return loc_OED
         else:
             pass 
@@ -176,13 +179,13 @@ class WF:
 
 
         
-    def construct_locOED_Ls(self, umat, OEH_type, doSCF=False, verbose=0):
+    def construct_locOED_Ls(self, umat, OEH_type, verbose=0):
         '''
         Construct MOs/one-electron density matrix dm_{pq}^{0L} at each lattice vector
         with a certain k-independent correlation potential umat
         '''    
     
-        loc_OED_kpts = self.construct_locOED_kpts(umat, OEH_type, doSCF=doSCF, verbose=verbose)
+        loc_OED_kpts = self.construct_locOED_kpts(umat, OEH_type, verbose=verbose)
         loc_OED_Ls = libdmet.iFFT1e(self.tmap, self.phase, loc_OED_kpts).real        
         return loc_OED_kpts, loc_OED_Ls
         
@@ -191,7 +194,7 @@ class WF:
         Construct total Fock in the ao basis (local = False) or active Fock in the local basis (locala = True)
         '''    
         kpts = self.kmf.kpts
-        DMao_kpts = np.asarray([reduce(np.dot,(self.CO[kpt], DMloc_kpts[kpt],self.CO[kpt].conj().T)) for kpt in range(self.nkpts)])
+        DMao_kpts = np.asarray([reduce(np.dot,(self.ao2lo[kpt], DMloc_kpts[kpt],self.ao2lo[kpt].conj().T)) for kpt in range(self.nkpts)])
         if not local:
             dm_kpts = self.coreDM_kpts + DMao_kpts
             JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
@@ -199,7 +202,7 @@ class WF:
         else:
             dm_kpts = DMao_kpts
             JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
-            JKloc = np.asarray([reduce(np.dot,(self.CO[kpt].conj().T, JKao[kpt],self.CO[kpt])) for kpt in range(self.nkpts)])
+            JKloc = np.asarray([reduce(np.dot,(self.ao2lo[kpt].conj().T, JKao[kpt],self.ao2lo[kpt])) for kpt in range(self.nkpts)])
             return self.loc_actOEI_kpts + JKloc
         
         
@@ -247,20 +250,20 @@ class WF:
         Compute the Wannier functions at the reference cell in the basis of local Gaussian
         '''
         
-        CO = []
+        ao2lo = []
         for kpt in range(self.nkpts):
             mo_included = w90.mo_coeff_kpts[kpt][:,w90.band_included_list]
             mo_in_window = w90.lwindow[kpt]         
             C_opt = mo_included[:,mo_in_window].dot(w90.U_matrix_opt[kpt].T)              
-            CO.append(C_opt.dot(w90.U_matrix[kpt].T))        
+            ao2lo.append(C_opt.dot(w90.U_matrix[kpt].T))        
             
-        CO = np.asarray(CO, dtype=np.complex128)
-        WFs = libdmet.iFFT1e(self.tmap, self.phase, CO)
+        ao2lo = np.asarray(ao2lo, dtype=np.complex128)
+        WFs = libdmet.iFFT1e(self.tmap, self.phase, ao2lo)
         
         # Check of WFs are real     
         if WFs.imag.max() >= 1.e-7: raise Exception('WFs are not real')
         
-        return CO, WFs.real
+        return ao2lo, WFs.real
 
     def to_kspace(self, M):
         '''
@@ -331,7 +334,9 @@ class WF:
         return -0.25*vk_kpts[0]    
         
     def make_tmap(self, kmesh):  
-        '''TODO: write comments '''
+        '''Exploring translational symmetry
+           TODO: I have to call it a translational map now. Should have better name and better algorithm  
+        '''
         nimgs = [kpt//2 for kpt in kmesh]
         Ts = lib.cartesian_prod((np.arange(-nimgs[0],nimgs[0]+1),np.arange(-nimgs[1],nimgs[1]+1),np.arange(-nimgs[2],nimgs[2]+1)))
         map = np.zeros([self.nLs,self.nLs],dtype=np.int64)  

@@ -69,7 +69,6 @@ class pDMET:
         self.SC_threshold       = 1e-7            
         self.SC_maxcycle        = 200
         self.SC_CFtype          = 'F' # Options: ['F','diagF', 'FB','diagFB']
-        self.doSCF              = False
         self.alt_CF             = False         
         self.damping            = 1.0 # 1.0 means no damping
         self.DIIS               = True           
@@ -144,7 +143,8 @@ class pDMET:
         # Labeling the reference unit cell as the fragment
         # The nkpts is an odd number so the reference unit is assumed to be in the middle of the computational supercell
         self.impCluster = np.zeros((self.Norbs))
-        self.impCluster[self.nImps*(self.nkpts//2):self.nImps*(self.nkpts//2 + 1)] = 1
+        self.impCluster[:self.nImps] = 1
+        #self.impCluster[self.nImps*(self.nkpts//2):self.nImps*(self.nkpts//2 + 1)] = 1
         
         # -------------------------------------------------        
         # Correlation/chemical potential
@@ -338,7 +338,7 @@ class pDMET:
         if locOED_Ls is not None:
             self.locOED_Ls = locOED_Ls
         else:
-            self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type, self.doSCF, self.verbose)[1]        # get both MO coefficients and 1-RDM in the local basis     
+            self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type self.verbose)[1]        # get both MO coefficients and 1-RDM in the local basis     
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
         self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)        
@@ -391,7 +391,7 @@ class pDMET:
         #------------------------------------#
         #---- SELF-CONSISTENCY PROCEDURE ----#      
         #------------------------------------#      
-        rdm1 = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.doSCF, self.verbose)
+        rdm1 = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.verbose)
         for cycle in range(self.SC_maxcycle):
             
             tprint.print_msg("- CYCLE %d:" % (cycle + 1))    
@@ -414,7 +414,7 @@ class pDMET:
                 
             self.uvec = result.x
             self.umat = self.uvec2umat(self.uvec)   
-            rdm1  = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.doSCF, self.verbose)   
+            rdm1  = self.local.construct_locOED_kpts(self.umat, self.OEH_type, self.verbose)   
             
             if self.umat_kpt == True:
                 self.umat = np.asarray([self.umat[kpt] - np.eye(self.umat[kpt].shape[0])*np.average(np.diag(self.umat[kpt])) for kpt in range(self.nkpts)])            
@@ -583,7 +583,7 @@ class pDMET:
         Return:
             error            : an array of errors for the unit cell.
         '''
-        locOED_kpts, locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type, self.doSCF, self.verbose)
+        locOED_kpts, locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type, self.verbose)
         if self.SC_CFtype in ['F', 'diagF']:        
             mf_1RDM = reduce(np.dot, (self.emb_orbs[:,:self.nImps].T, locOED, self.emb_orbs[:,:self.nImps]))
             corr_1RDM = self.emb_1RDM[:self.nImps,:self.nImps]              
@@ -604,7 +604,7 @@ class pDMET:
         Return:
             error            : an array of errors for the unit cell.
         '''
-        locOED_kpts, locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type, self.doSCF, self.verbose)
+        locOED_kpts, locOED = self.local.construct_locOED_Ls(self.uvec2umat(uvec), self.OEH_type, self.verbose)
         corr_1RDM = self.construct_global_1RDM()
         error = locOED - corr_1RDM   
         return error, locOED_kpts
@@ -620,7 +620,7 @@ class pDMET:
                              
         '''
         
-        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, self.doSCF, locOED_kpts)
+        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, locOED_kpts)
         the_gradient = []    
         if self.umat_kpt == True:
             for i, kpt in enumerate(self.kpts_irred):   # this is k1 index of u, RDM_deriv(k0) is non zero only when k0 = k1 = kpt
@@ -655,7 +655,7 @@ class pDMET:
                              
         '''
         
-        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, self.doSCF, locOED_kpts)
+        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, locOED_kpts)
         the_gradient = []    
         if self.umat_kpt == True:
             for u in range(self.Nterms):  
@@ -675,7 +675,7 @@ class pDMET:
         '''
         
         umat = self.uvec2umat(uvec)
-        locOED_Ls = self.local.construct_locOED_Ls(umat, self.OEH_type, self.doSCF, self.verbose)[1]       
+        locOED_Ls = self.local.construct_locOED_Ls(umat, self.OEH_type, self.verbose)[1]       
         if self.OEH_type == 'FOCK':
             OEH = self.local.loc_actFOCK_kpts #+umat
             OEH = self.local.to_Ls(OEH)
@@ -812,18 +812,13 @@ class pDMET:
         H1col   = np.array(H1col)    
         return theH1, H1start, H1row, H1col
         
-    def construct_1RDM_response_kpts(self, uvec, doSCF=False, locOED_kpts=None):
+    def construct_1RDM_response_kpts(self, uvec, locOED_kpts=None):
         '''
         Calculate the derivative of 1RDM
         '''
             
         rdm_deriv_kpts = []
-        
-        if doSCF:
-            loc_actFOCK_kpts = self.local.construct_Fock_kpts(locOED_kpts, local=True) + self.uvec2umat(uvec)
-        else:
-            loc_actFOCK_kpts = self.local.loc_actFOCK_kpts + self.uvec2umat(uvec)
-        
+        loc_actFOCK_kpts = self.local.loc_actFOCK_kpts + self.uvec2umat(uvec)
         for kpt in range(self.nkpts):
             rdm_deriv = libdmet.rhf_response_c(self.nImps, self.Nterms, self.numPairs, self.H1start, self.H1row, self.H1col, loc_actFOCK_kpts[kpt])
             rdm_deriv_kpts.append(rdm_deriv)
@@ -881,37 +876,12 @@ class pDMET:
         eigvecs = np.asarray([eigvecs[kpt][:,idx_kpts[kpt]] for kpt in range(self.nkpts)], dtype=np.complex128)
         mo_coeff_kpts = np.asarray(self.kmf.mo_coeff_kpts)
         mo_energy_kpts = np.asarray(self.kmf.mo_energy_kpts)
-        mo_coeff_kpts[:,:,self.w90.band_included_list] = np.einsum('kpq,kqr->kpr',self.local.CO,eigvecs)
+        mo_coeff_kpts[:,:,self.w90.band_included_list] = np.einsum('kpq,kqr->kpr',self.local.ao2lo,eigvecs)
         mo_energy_kpts[:,self.w90.band_included_list] = eigvals
             
         kmf = self.kmf
         kmf.mo_energy_kpts = mo_energy_kpts
         kmf.mo_coeff_kpts = mo_coeff_kpts     
-        tprint.print_msg('---------- Computing band structure: Done ----------') 
-        
-        return kmf
-
-    def get_bands_old(self, cell=None, dm_kpts=None, kpts=None):
-        ''' Embedding 1RDM is used to construct the global 1RDM.
-            Then the bands are constructed by diagonalizing the modified FOCK operator
-                F_new = H_core + JK(D_global)
-            TODO: DEBUGGING
-        '''
-        tprint.print_msg('------------- Computing band structure -------------')        
-        if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kmf.kpts
-        
-        DMglobal = self.construct_global_1RDM()
-        DMloc_kpts = self.local.to_kspace(DMglobal)     # Transform the global DM to k-space
-        DMao_kpts = np.asarray([reduce(np.dot,(self.local.CO[kpt], DMloc_kpts[kpt],self.local.CO[kpt].conj().T)) for kpt in range(self.nkpts)])
-        DMao_total = self.local.coreDM_kpts + DMao_kpts
-        JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=DMao_total, kpts=kpts, kpts_band=kpts)
-        fock = self.kmf.get_hcore(self.cell, kpts) + JKao
-        s1e = self.kmf.get_ovlp(cell, kpts)
-        mo_energy, mo_coeff = self.kmf.eig(fock, s1e)
-        kmf = self.kmf
-        kmf.mo_energy_kpts = mo_energy
-        kmf.mo_coeff_kpts = mo_coeff       
         tprint.print_msg('---------- Computing band structure: Done ----------') 
         
         return kmf
