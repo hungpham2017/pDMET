@@ -151,9 +151,12 @@ class QCsolvers:
             RDM1 = RDM1.sum(axis=0)
                 
         # Compute total energy        
-        e_cell = self.kmf_ecore + ImpurityEnergy       
+        e_cell = self.kmf_ecore + ImpurityEnergy   
+
+        #DEBUG: ERHF will be removed
+        print("DEBUG ERHF", ERHF+self.kmf_ecore)
         
-        return (e_cell, RDM1)
+        return (e_cell, RDM1) 
         
 ##################################
 ########## RCCSD solver ########## 

@@ -64,7 +64,7 @@ class pDMET:
         self.e_shift  = None         # Use to fix spin of the wrong state with FCI, hence CASCI/CASSCF solver
         
         # Parameters
-        self.kmesh_sym          = True        
+        self.kmesh_sym          = False      
         self.SC_method          = 'L-BFGS-B'        # BFGS, L-BFGS-B, CG, Newton-CG
         self.SC_threshold       = 1e-7            
         self.SC_maxcycle        = 200
@@ -254,21 +254,48 @@ class pDMET:
         Nelec_in_imp = int(round(self.Nelecs - np.sum(envOrbs_or_core_eigenvals)))
         Nelec_in_environment = int(np.sum(np.abs(envOrbs_or_core_eigenvals)))                
         core1RDM_local = reduce(np.dot, (FBEorbs, np.diag(envOrbs_or_core_eigenvals), FBEorbs.T))                     
-            
+
         # Transform the 1e/2e integrals and the JK core constribution to schmidt basis
         emb_orbs = FBEorbs[:,:Norb_in_imp]
-        ao2eo = self.local.get_ao2eo(emb_orbs, Norb_in_imp)
+        ao2eo = self.local.get_ao2eo(emb_orbs)
         dmetOEI  = self.local.dmet_oei(ao2eo)
-        dmetTEI  = self.local.dmet_tei(ao2eo)            
-        dmet_1RDM =  reduce(np.dot, (emb_orbs.T, self.locOED_Ls, emb_orbs))  #TODO: need to be debugged
-        dmetCoreJK = self.local.dmet_corejk(ao2eo, dmetOEI, dmetTEI, dmet_1RDM) # TODO: need to modify
+        dmetTEI  = self.local.dmet_tei(ao2eo)
+        
+        # you are debugging the CoreJK
+        dmet_1RDM =  reduce(np.dot, (emb_orbs.T, self.locOED_Ls, emb_orbs))
+        dmetCoreJK = self.local.dmet_corejk(ao2eo, dmetTEI, dmet_1RDM) 
+        print("dmetCoreJK1: ", dmetCoreJK)
+         
+        #DEBUG:
+        # S_kpts = self.kmf.get_ovlp()
+        # F_kpts = self.kmf.get_fock()
+        # H_kpts = self.kmf.get_hcore()
+        # loc_S_kpts = self.local.to_local(S_kpts)
+        # loc_F_kpts = self.local.to_local(F_kpts)
+        # loc_H_kpts = self.local.to_local(H_kpts)
+        # loc_S_Ls = self.local.k_to_R(loc_S_kpts) 
+        # loc_F_Ls = self.local.k_to_R(loc_F_kpts)
+        # loc_H_Ls = self.local.k_to_R(loc_H_kpts)
+        # import scipy
+        # e, orbs = scipy.linalg.eigh(loc_F_Ls)
+        # loc_D_ref = 2 * orbs[:,:3] @ orbs[:,:3].T
+        # loc_D_kpts, loc_D_Ls = self.local.construct_locOED_Ls(umat=0)
+        
+        
+        # emb_D = emb_orbs.T @ loc_H_Ls @ emb_orbs
+        # print("HOHO1:", emb_D)
+        # emb_D  = self.local.dmet_oei(ao2eo)
+        # print("HOHO2:", emb_D)
+        # emb_D  = self.local.dmet_oei_debug(loc_F_kpts, emb_orbs)
+        # print("HOHO2:", emb_D)      
+
 
         # Solving the embedding problem with high level wfs
-        if self._cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" % (Nelec_in_imp, numImpOrbs, numBathOrbs))                        
-        DMguess = reduce(np.dot,(emb_orbs.T, self.locOED_Ls, emb_orbs))    
+        if self._cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" \
+                                                                    % (Nelec_in_imp, numImpOrbs, numBathOrbs))
         
         self.qcsolver.initialize(self.local.e_core, dmetOEI, dmetTEI, \
-                                dmetCoreJK, DMguess, Norb_in_imp, Nelec_in_imp, numImpOrbs, chempot)
+                                dmetCoreJK, dmet_1RDM, Norb_in_imp, Nelec_in_imp, numImpOrbs, chempot)
         if self.solver == 'HF':
             e_cell, RDM1 = self.qcsolver.HF()
         elif self.solver in ['CASCI','CASSCF']:
@@ -347,7 +374,8 @@ class pDMET:
         if locOED_Ls is not None:
             self.locOED_Ls = locOED_Ls
         else:
-            self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type, self.verbose)[1]        # get both MO coefficients and 1-RDM in the local basis     
+            self.locOED_Ls = self.local.construct_locOED_Ls(self.umat, self.OEH_type, self.verbose)[1]        # get both MO coefficients and 1-RDM in the local basis
+        
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.locOED_Ls)
         self.baths = schmidt.baths(self.bath_truncation) 
         self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)        
@@ -643,7 +671,7 @@ class pDMET:
                     the_gradient.append(self.sym_counts[i]*error_deriv_in_schmidt_basis)                    
         else:
             for u in range(self.Nterms):
-                RDM_deriv_Ls = self.local.to_Ls(the_RDM_deriv_kpts[:,u,:,:])    # Transform RDM_deriv from k-space to L-space               
+                RDM_deriv_Ls = self.local.k_to_R(the_RDM_deriv_kpts[:,u,:,:])    # Transform RDM_deriv from k-space to L-space               
                 if self.SC_CFtype in ['F','diagF']: 
                     error_deriv_in_schmidt_basis = reduce(np.dot, (self.emb_orbs[:,:self.nImps].T, RDM_deriv_Ls, self.emb_orbs[:,:self.nImps]))    
                 elif self.SC_CFtype in ['FB','diagFB']:
@@ -673,7 +701,7 @@ class pDMET:
                     the_gradient.append(self.sym_counts[i]*RDM_deriv_Ls)                    
         else:
             for u in range(self.Nterms):
-                RDM_deriv_Ls = self.local.to_Ls(the_RDM_deriv_kpts[:,u,:,:])    # Transform RDM_deriv from k-space to L-space          
+                RDM_deriv_Ls = self.local.k_to_R(the_RDM_deriv_kpts[:,u,:,:])    # Transform RDM_deriv from k-space to L-space          
                 the_gradient.append(RDM_deriv_Ls)
         
         return the_gradient
@@ -687,13 +715,13 @@ class pDMET:
         locOED_Ls = self.local.construct_locOED_Ls(umat, self.OEH_type, self.verbose)[1]       
         if self.OEH_type == 'FOCK':
             OEH = self.local.loc_actFOCK_kpts #+umat
-            OEH = self.local.to_Ls(OEH)
+            OEH = self.local.k_to_R(OEH)
             e_fun = np.trace(OEH.dot(locOED_Ls))
         else: 
             print('Other type of 1e electron is not supported')
           
         umat_kpts = np.asarray([umat]*self.nkpts)  
-        umat_Ls = self.local.to_Ls(umat_kpts) 
+        umat_Ls = self.local.k_to_R(umat_kpts) 
         rdm_diff = self.glob_rdm_diff(uvec)[0]  
         e_cstr = np.sum(umat_Ls*rdm_diff)  
 

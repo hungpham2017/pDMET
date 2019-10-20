@@ -20,13 +20,65 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 '''
 
 import numpy as np
+import scipy
+from scipy import fftpack
 from functools import reduce
-from pyscf.pbc.tools import pywannier90
+from pyscf.pbc import tools
+from pyscf.pbc.tools import pywannier90, k2gamma
 from pyscf import lib, ao2mo
 from pDMET.tools import tchkfile, tunix
 from pDMET.pdmet import helper, df
 from pDMET.lib.build import libdmet
 
+    
+def mo_k2gamma(self, cell, mo_energy, mo_coeff, kpts, kmesh=None):
+    '''Get the phase for local/mo integral transformation
+        This is function is taken from pyscf.pbc.tools.k2gamma'''
+    scell, phase = self.get_phase(cell, kpts, kmesh)
+
+    E_g = np.hstack(mo_energy)
+    C_k = np.asarray(mo_coeff)
+    Nk, Nao, Nmo = C_k.shape
+    NR = phase.shape[0]
+
+    # Transform AO indices
+    C_gamma = np.einsum('Rk, kum -> Rukm', phase, C_k)
+    C_gamma = C_gamma.reshape(Nao*NR, Nk*Nmo)
+
+    E_sort_idx = np.argsort(E_g)
+    E_g = E_g[E_sort_idx]
+    C_gamma = C_gamma[:,E_sort_idx]
+    s = scell.pbc_intor('int1e_ovlp')
+    assert(abs(reduce(np.dot, (C_gamma.conj().T, s, C_gamma))
+               - np.eye(Nmo*Nk)).max() < 1e-5)
+
+    # Transform MO indices
+    E_k_degen = abs(E_g[1:] - E_g[:-1]) < 1e-3
+    degen_mask = np.append(False, E_k_degen) | np.append(E_k_degen, False)
+    if np.any(E_k_degen):
+        if abs(C_gamma[:,~degen_mask].imag).max() < 1e-4:
+            shift = min(E_g[degen_mask]) - .1
+            f = np.dot(C_gamma[:,degen_mask] * (E_g[degen_mask] - shift),
+                       C_gamma[:,degen_mask].conj().T)
+            assert(abs(f.imag).max() < 1e-4)
+
+            e, na_orb = scipy.linalg.eigh(f.real, s, type=2)
+            C_gamma = C_gamma.real
+            C_gamma[:,degen_mask] = na_orb[:, e>1e-7]
+        else:
+            f = np.dot(C_gamma * E_g, C_gamma.conj().T)
+            assert(abs(f.imag).max() < 1e-4)
+            e, C_gamma = scipy.linalg.eigh(f.real, s, type=2)
+
+    s_k = cell.pbc_intor('int1e_ovlp', kpts=kpts)
+    # overlap between k-point unitcell and gamma-point supercell
+    s_k_g = np.einsum('kuv,Rk->kuRv', s_k, phase.conj()).reshape(Nk,Nao,NR*Nao)
+    # The unitary transformation from k-adapted orbitals to gamma-point orbitals
+    mo_phase = lib.einsum('kum,kuv,vi->kmi', C_k.conj(), s_k_g, C_gamma)
+
+    return scell, E_g, C_gamma, mo_phase
+    
+    
 class WF:
     def __init__(self, cell, kmf, w90, chkfile=None):
         '''
@@ -41,15 +93,17 @@ class WF:
         self.spin = cell.spin        
         self.e_tot = kmf.e_tot
         self.w90 = w90
+        self.kmesh = w90.mp_grid_loc
         self.kmf = kmf   
         self.ovlp = self.kmf.get_ovlp()
         self.kpts = kmf.kpts
         self.nkpts = kmf.kpts.shape[0]    
         self.nao = cell.nao_nr()
         
-        self.nLs, self.Ls, self.phase = self.get_phase(self.cell, self.w90, self.kpts)
+        self.scell, self.phase = self.get_phase(self.cell, self.kpts, self.kmesh)
+        self.nLs = self.phase.shape[0]
         self.tmap = self.make_tmap(w90.mp_grid_loc)
-        self.ao2lo = self.get_WFs(self.w90)[0]    # Used to transform AO to local basis in k-space
+        self.ao2lo = self.get_ao2lo()    # Used to transform AO to local basis in k-space
 
         #-------------------------------------------------------------
         # Construct the effective Hamiltonian due to the frozen core  | 
@@ -64,7 +118,6 @@ class WF:
         self.norbs = self.nkpts * self.nactorbs
         self.nactelecs = np.int32(cell.nelectron - np.sum(kmf.mo_occ_kpts[0][self.active==0]))        
         self.nelec = self.nkpts * self.nactelecs
-
 
         # TODO: decide which part can be stored in a check file later
         # chkfile_exist = None     
@@ -83,13 +136,18 @@ class WF:
     
         self.coreDM_kpts = np.asarray(coreDM_kpts, dtype=np.complex128)
         coreJK_kpts = kmf.get_veff(cell, self.coreDM_kpts, hermi = 1, kpts = self.kpts, kpts_band = None)
-    
+
         # Core energy from the frozen orbitals
         self.e_core = cell.energy_nuc() + 1./self.nkpts *np.einsum('kij,kji->', fullOEI_kpts + 0.5*coreJK_kpts, self.coreDM_kpts).real        
                
         # 1e integral for the active part
-        actOEI_kpts = fullOEI_kpts + coreJK_kpts     
-        self.loc_actOEI_kpts = self.to_local(actOEI_kpts, self.ao2lo)
+        self.actOEI_kpts = fullOEI_kpts + coreJK_kpts     
+        self.loc_actOEI_kpts = self.to_local(self.actOEI_kpts, self.ao2lo)
+
+        # Fock for the active part          
+        self.fullfock_kpts = kmf.get_fock()            
+        self.loc_actFOCK_kpts = self.to_local(self.fullfock_kpts, self.ao2lo)     
+        self.actJK_kpts = self.fullfock_kpts - self.actOEI_kpts     
         # self.loc_actOEI_Ls = self.to_Ls(self.loc_actOEI_kpts)
   
         
@@ -99,10 +157,8 @@ class WF:
         # self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.ao2lo)            
         # self.loc_actTEI_Ls = self.to_Ls2e(self.loc_actTEI_kpts, kconserv) 
         
-        # Fock for the active part          
-        fullfock_kpts = kmf.get_fock()            
-        self.loc_actFOCK_kpts = self.to_local(fullfock_kpts, self.ao2lo)      
             
+        print("FROM WF", self.e_core)
         # Save integrals to chkfile:            
         # if chkfile_exist == False:
             # tchkfile.save_pdmet_int(self, chkfile)
@@ -124,7 +180,7 @@ class WF:
             # self.loc_actVHF_kpts  = savepdmet.loc_actVHF_kpts             
 
         
-    def construct_locOED_kpts(self, umat, OEH_type, verbose=0):
+    def construct_locOED_kpts(self, umat, OEH_type='FOCK', verbose=0):
         '''
         Construct MOs/one-electron density matrix at each k-point in the local basis
         with a certain k-independent correlation potential umat
@@ -153,153 +209,115 @@ class WF:
         else:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
-
-
         
-    def construct_locOED_Ls(self, umat, OEH_type, verbose=0):
+    def construct_locOED_Ls(self, umat, OEH_type='FOCK', verbose=0):
         '''
         Construct MOs/one-electron density matrix dm_{pq}^{0L} at each lattice vector
         with a certain k-independent correlation potential umat
         '''    
     
         loc_OED_kpts = self.construct_locOED_kpts(umat, OEH_type, verbose=verbose)
-        loc_OED_Ls = libdmet.iFFT1e(self.tmap, self.phase, loc_OED_kpts).real        
+        loc_OED_Ls = self.k_to_R(loc_OED_kpts)
         return loc_OED_kpts, loc_OED_Ls
-        
-    def construct_Fock_kpts(self, DMloc_kpts, local=True):
-        '''
-        Construct total Fock in the ao basis (local = False) or active Fock in the local basis (locala = True)
-        '''    
-        kpts = self.kmf.kpts
-        DMao_kpts = np.asarray([reduce(np.dot,(self.ao2lo[kpt], DMloc_kpts[kpt],self.ao2lo[kpt].T.conj())) for kpt in range(self.nkpts)])
-        if not local:
-            dm_kpts = self.coreDM_kpts + DMao_kpts
-            JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
-            return self.kmf.get_hcore(self.cell, kpts) + JKao
-        else:
-            dm_kpts = DMao_kpts
-            JKao = self.kmf.get_veff(cell=self.cell, dm_kpts=dm_kpts, kpts=kpts, kpts_band=kpts)
-            JKloc = np.asarray([reduce(np.dot,(self.ao2lo[kpt].T.conj(), JKao[kpt],self.ao2lo[kpt])) for kpt in range(self.nkpts)])
-            return self.loc_actOEI_kpts + JKloc
-        
         
     def dmet_oei(self, ao2eo):
         '''Get embedding OEI'''
-        oei = 0.0
-        for kpt in range(self.nkpts):
-            oei += reduce(np.dot,(ao2eo[kpt].T.conj(), self.loc_actOEI_kpts[kpt], ao2eo[kpt]))
-        return oei
+        oei = np.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.actOEI_kpts, ao2eo)
+        assert(abs(oei.imag).max() < 1e-7)
+        return oei.real
 
+    def dmet_fock(self, ao2eo):
+        '''Get embedding FOCK used to get core JK in embedding space without explicitly computing core JK in local space, need more efficient algorithm'''    
+        fock = np.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.fullfock_kpts, ao2eo)
+        assert(abs(fock.imag).max() < 1e-7)
+        return fock.real
+
+    def dmet_JK(self, ao2eo):
+        '''Get embedding JK used to get core JK in embedding space without explicitly computing core JK in local space'''    
+        dmetJK = np.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.actJK_kpts, ao2eo)
+        assert(abs(dmetJK.imag).max() < 1e-7)
+        return dmetJK.real 
+
+    def dmet_corejk(self, ao2eo, dmetTEI, dmet_1RDM):
+        '''Get embedding core JK'''
+        ''' TODO: need to debug and make more efficient
+        '''
+        dmetJK = self.dmet_JK(ao2eo)
+        J = np.einsum('pqrs,rs->pq', dmetTEI, dmet_1RDM)
+        K = np.einsum('prqs,rs->pq', dmetTEI, dmet_1RDM) 
+        dmetJKemb = J - 0.5*K  
+        dmetJKcore = dmetJK - dmetJKemb
+        return dmetJKcore
+        
     def dmet_tei(self, ao2eo):
         '''Get embedding TEI or 2e ERI'''
         ''' TODO: modify this to adapt it to GDF'''
         mydf = self.kmf.with_df   
         tei = df.get_emb_ERIs(self.cell, mydf, ao2eo)
-        return tei        
-
-    def dmet_fock(self, ao2eo):
-        '''Get embedding FOCK used to get core JK in embedding space without explicitly computing core JK in local space, need more efficient algorithm'''
-        fock = 0.0
-        for kpt in range(self.nkpts):
-            fock += reduce(np.dot,(ao2eo[kpt].T.conj(), self.loc_actFOCK_kpts[kpt], ao2eo[kpt]))
-            
-        return fock
-
-    def dmet_corejk(self, ao2eo, dmetOEI, dmetTEI, dmet1RDM):
-        '''Get embedding core JK'''
-        ''' TODO: need to debug and make more efficient
-        '''
-        dmetFock = self.dmet_fock(ao2eo)
-        J = np.einsum('pqrs,rs->pq', dmetTEI, dmet1RDM)
-        K = np.einsum('prqs,rs->pq', dmetTEI, dmet1RDM) 
-        dmetJK = dmetFock - dmetOEI - (J - 0.5*K)   
-        return dmetJK
+        return tei       
         
-    def get_phase(self, cell=None, w90=None, kpts=None):
+    def get_phase(self, cell=None, kpts=None, kmesh=None):
         '''
-        Generate real space lattice vector corresponding to the kmesh the phase factors
+        Get a super cell and the phase matrix that transform from real to k-space 
         '''
-        if w90 is None : w90 = self.w90
+        if kmesh is None : kmesh = w90.mp_grid_loc
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
         
-        kmesh = w90.mp_grid_loc
         a = cell.lattice_vectors()
         Ts = lib.cartesian_prod((np.arange(kmesh[0]), np.arange(kmesh[1]), np.arange(kmesh[2])))
         Ls = np.dot(Ts, a)
         nLs = Ls.shape[0]
-        phase = 1/nLs * np.exp(1j*Ls.dot(kpts.T))
+        phase = 1/np.sqrt(nLs) * np.exp(1j*Ls.dot(kpts.T))
+        scell = tools.super_cell(cell, kmesh)
         
-        return nLs, Ls, phase
-    
-    def make_supcell(self, cell, nimgs):
-        '''
-        Make the computational supercell instance used to get the oei and tei in real space
-        Note: this orbitals are consistent with the self.Ls vector
-        '''
-        from pyscf.pbc.tools import pbc
-        supcell = cell.copy()
-        a = cell.lattice_vectors()
-        Ts = lib.cartesian_prod((np.arange(nimgs[0])-nimgs[0]//2,
-                        np.arange(nimgs[1])-nimgs[1]//2,
-                        np.arange(nimgs[2])-nimgs[2]//2))
-        Ls = np.dot(Ts, a)
-        symbs = [atom[0] for atom in cell._atom] * len(Ls)
-        coords = Ls.reshape(-1,1,3) + cell.atom_coords()
-        supcell.atom = list(zip(symbs, coords.reshape(-1,3)))
-        supcell.unit = 'B'
-        supcell.a = np.einsum('i,ij->ij', nimgs, a)
-        supcell.mesh = np.array([nimgs[0]*cell.mesh[0],
-                                 nimgs[1]*cell.mesh[1],
-                                 nimgs[2]*cell.mesh[2]])
-        supcell.build(False, False, verbose=0)
-        supcell.verbose = cell.verbose
-        return supcell        
+        return scell, phase
 
-    def get_WFs(self, w90):
+    def get_ao2lo(self, w90=None):
         '''
-        Compute the Wannier functions at the reference cell in the basis of local Gaussian
+        Compute the k-space Wannier orbitals
         '''
-        
+        if w90 is None: w90 = self.w90
         ao2lo = []
         for kpt in range(self.nkpts):
             mo_included = w90.mo_coeff_kpts[kpt][:,w90.band_included_list]
             mo_in_window = w90.lwindow[kpt]         
-            C_opt = mo_included[:,mo_in_window].dot(w90.U_matrix_opt[kpt].T)              
+            C_opt = mo_included[:,mo_in_window].dot(w90.U_matrix_opt[kpt].T)           
             ao2lo.append(C_opt.dot(w90.U_matrix[kpt].T))        
-            
+           
         ao2lo = np.asarray(ao2lo, dtype=np.complex128)
+        return ao2lo
         
-        #TODO: for debugging purposes, need to be removed
-        WFs = 0.0
-        for kpt in range(self.nkpts):
-            WFs += ao2lo[kpt]
-            
-        #WFs = libdmet.iFFT1e(self.tmap, self.phase, ao2lo)
-        
-        # Check of WFs are real     
-        assert WFs.imag.max() < 1.e-7, 'WFs are not real'
-        
-        return ao2lo, WFs.real
-        
-    def get_ao2eo(self, emb_orbs, Norb_in_imp):
+    def get_ao2eo(self, emb_orbs):
         '''
         Get the transformation matrix from AO to EO
+            u, v    : k-space ao indices 
+            i, j    : k-space mo/local indices
+            m, n    : embedding indices
+            capital : R-space indices 
+            R, S, T : R-spacce lattice vector
         '''
-        emb_orbs_Ls = emb_orbs.reshape(self.nLs, self.nactorbs, Norb_in_imp)
-        lo2eo = np.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs_Ls) 
-        ao2eo = np.einsum('kim, kmj -> kij', self.ao2lo, lo2eo) 
+        mo_energy = self.kmf.mo_energy
+        mo_coeff = self.ao2lo   
+        scell, E_g, C_gamma, mo_phase = mo_k2gamma(self, self.cell, mo_energy, mo_coeff, self.kpts, self.kmesh)
+            
+        # emb_orbs_Ls = emb_orbs.reshape(self.nLs, self.nactorbs, Norb_in_imp)
+        # lo2eo = np.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs_Ls) 
+        lo2eo = np.einsum('kiI, Im -> kim', mo_phase, emb_orbs) 
+        ao2eo = np.einsum('kui, kim -> kum', self.ao2lo, lo2eo) 
         return ao2eo
 
     def to_kspace(self, M):
         '''
         Transform an one-electron matrix M_{pq}(L) to the k-space
+        TODO: considered to remove
         '''
         return libdmet.FT1e(self.nkpts, self.kpts, self.nLs, self.Ls, M)  
         
-    def to_Ls(self, Mk):
+    def to_Ls_old(self, Mk):
         '''
         Transform an one-electron matrix M_{pq}(k) to the L-space
+        TODO: will be removed
         '''
         if Mk.ndim == 2: Mk = npasarray([Mk for kpt in range(self.nkpts)])
         return libdmet.iFFT1e(self.tmap, self.phase, Mk).real       
@@ -307,6 +325,7 @@ class WF:
     def to_Ls_sparse(self, Mat_kpt, kpt):
         '''
         Transform an one-electron matrix M_{pq}(k) to the L-space
+        TODO: will be removed
         '''
         return libdmet.iFT1e_sparse(self.nkpts, kpt, self.nLs, self.Ls, Mat_kpt).real     
 
@@ -317,12 +336,12 @@ class WF:
         '''
         return libdmet.iFFT2e(self.tmap, self.phase, kconserv, Mijk).real           
 
-    def to_local(self, Mk, ao2lo):
+    def to_local(self, Mk, ao2lo=None):
         '''
         Transform an one-electron operator M_{pq}(k) in the ao basis to the local basis
         '''      
-        loc_Mk = np.asarray([reduce(np.dot, (ao2lo[kpt].T.conj(), Mk[kpt], ao2lo[kpt])) for kpt in range(self.nkpts)])
-        return loc_Mk
+        if ao2lo is None: ao2lo = self.ao2lo
+        return np.einsum('kui,kuv,kvj->kij', ao2lo.conj(), Mk, ao2lo)
 
     def get_tei_kpts(self, kconserv, ao2lo):
         '''
@@ -349,6 +368,7 @@ class WF:
     def make_tmap(self, kmesh):  
         '''Exploring translational symmetry
            TODO: I have to call it a translational map now. Should have better name and better algorithm  
+           consider to remove and find another way to reconstruct the supercell 2e ERIs
         '''
         nimgs = [kpt//2 for kpt in kmesh]
         Ts = lib.cartesian_prod((np.arange(-nimgs[0],nimgs[0]+1),np.arange(-nimgs[1],nimgs[1]+1),np.arange(-nimgs[2],nimgs[2]+1)))
@@ -365,3 +385,23 @@ class WF:
                         if (deltaT[b] == Ts[self.nLs-1-L]).all(): map[a,b] = self.nLs-1-L
                     
         return map
+        
+    def k_to_R(self, M_kpts, mo=True):  
+        '''Transform k-space 1e integral to R-space
+            u, v    : k-space ao indices 
+            i, j    : k-space mo/local indices
+            m, n    : embedding indices
+            capital : R-space indices 
+            R, S, T : R-spacce lattice vector
+           TODO: write comment
+        ''' 
+        if mo == True: # MO/local integral
+            mo_energy = self.kmf.mo_energy
+            mo_coeff = self.ao2lo   
+            scell, E_g, C_gamma, mo_phase = mo_k2gamma(self, self.cell, mo_energy, mo_coeff, self.kpts, self.kmesh)
+            M_Ls = lib.einsum('kiI,kij,kjJ->IJ', mo_phase.conj(), M_kpts, mo_phase)
+        else:  # AO integral
+            M_Ls = np.einsum('Rk,kuv,Sk->RuSv', self.phase, M_kpts, self.phase.conj())
+            M_Ls = M_Ls.reshape(self.nLs*self.nao, self.nLs*self.nao)
+        assert(abs(M_Ls.imag).max() < 1e-7)
+        return M_Ls.real
