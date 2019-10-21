@@ -149,7 +149,8 @@ class pDMET:
         # Labeling the reference unit cell as the fragment
         # The nkpts is an odd number so the reference unit is assumed to be in the middle of the computational supercell
         self.impCluster = np.zeros((self.Norbs))
-        self.impCluster[:self.nImps] = 1
+        #self.impCluster[:self.nImps] = 1
+        self.impCluster[2:4] = 1
         #self.impCluster[self.nImps*(self.nkpts//2):self.nImps*(self.nkpts//2 + 1)] = 1
         
         # -------------------------------------------------        
@@ -259,13 +260,54 @@ class pDMET:
         emb_orbs = FBEorbs[:,:Norb_in_imp]
         ao2eo = self.local.get_ao2eo(emb_orbs)
         dmetOEI  = self.local.dmet_oei(ao2eo)
-        dmetTEI  = self.local.dmet_tei(ao2eo)
+        
+        
+        # DEBUG TEI
+        
+        dmetTEI  = self.local.dmet_tei(ao2eo)           #GDF
+        dmetTEI1 = self.local.get_TEI(ao2eo)
+        loc_TEI = self.local.get_loc_TEI()
+        dmetTEI2 = self.local.locTEI_to_dmetTEI(loc_TEI, emb_orbs)
+        print("TEI diff1", abs(dmetTEI1 - dmetTEI).max())
+        print("TEI diff2", abs(dmetTEI2 - dmetTEI).max())
         
         # you are debugging the CoreJK
         dmet_1RDM =  reduce(np.dot, (emb_orbs.T, self.locOED_Ls, emb_orbs))
         dmetCoreJK = self.local.dmet_corejk(ao2eo, dmetTEI, dmet_1RDM) 
-        print("dmetCoreJK1: ", dmetCoreJK)
-         
+        
+
+        #DEBUG E:
+        Eelec_ref, EJK_ref = self.kmf.energy_elec()
+        Ecore_ref = Eelec_ref - EJK_ref
+        
+        
+        #DEBUG JK
+        dmet_envJK1 = self.local.dmet_corejk(ao2eo, dmetTEI, dmet_1RDM)
+      
+        J = np.einsum('pqrs,rs->pq', loc_TEI, core1RDM_local)
+        K = np.einsum('prqs,rs->pq', loc_TEI, core1RDM_local)
+        envJK = J -0.5*K                               # local core JK
+        dmet_envJK2 = emb_orbs.T @ envJK @ emb_orbs   # embedding core JK
+       
+
+        loc_OEI_kpts = self.local.loc_actOEI_kpts
+        loc_OEI = self.local.k_to_R(loc_OEI_kpts)
+        
+        E_env = ((loc_OEI + 0.5*envJK) * core1RDM_local).sum()     
+        
+        J = np.einsum('pqrs,rs->pq', dmetTEI, dmet_1RDM)
+        K = np.einsum('prqs,rs->pq', dmetTEI, dmet_1RDM)
+        JK = J -0.5*K
+        OEI = self.local.dmet_oei(ao2eo) + dmet_envJK1
+        E1 = (OEI * dmet_1RDM).sum()
+        E_JK = 0.5*(JK* dmet_1RDM).sum()
+        Eelec = (E1 + E_JK + E_env)/self.nkpts
+
+        print("KRHF: %16.12f %16.12f %16.12f" % (Ecore_ref, EJK_ref, Eelec_ref))
+        print("DMET: %16.12f %16.12f %16.12f" % (E1 + E_JK, E_env, Eelec))
+        
+        
+        
         #DEBUG:
         # S_kpts = self.kmf.get_ovlp()
         # F_kpts = self.kmf.get_fock()

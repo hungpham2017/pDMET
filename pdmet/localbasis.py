@@ -31,53 +31,6 @@ from pDMET.pdmet import helper, df
 from pDMET.lib.build import libdmet
 
     
-def mo_k2gamma(self, cell, mo_energy, mo_coeff, kpts, kmesh=None):
-    '''Get the phase for local/mo integral transformation
-        This is function is taken from pyscf.pbc.tools.k2gamma'''
-    scell, phase = self.get_phase(cell, kpts, kmesh)
-
-    E_g = np.hstack(mo_energy)
-    C_k = np.asarray(mo_coeff)
-    Nk, Nao, Nmo = C_k.shape
-    NR = phase.shape[0]
-
-    # Transform AO indices
-    C_gamma = np.einsum('Rk, kum -> Rukm', phase, C_k)
-    C_gamma = C_gamma.reshape(Nao*NR, Nk*Nmo)
-
-    E_sort_idx = np.argsort(E_g)
-    E_g = E_g[E_sort_idx]
-    C_gamma = C_gamma[:,E_sort_idx]
-    s = scell.pbc_intor('int1e_ovlp')
-    assert(abs(reduce(np.dot, (C_gamma.conj().T, s, C_gamma))
-               - np.eye(Nmo*Nk)).max() < 1e-5)
-
-    # Transform MO indices
-    E_k_degen = abs(E_g[1:] - E_g[:-1]) < 1e-3
-    degen_mask = np.append(False, E_k_degen) | np.append(E_k_degen, False)
-    if np.any(E_k_degen):
-        if abs(C_gamma[:,~degen_mask].imag).max() < 1e-4:
-            shift = min(E_g[degen_mask]) - .1
-            f = np.dot(C_gamma[:,degen_mask] * (E_g[degen_mask] - shift),
-                       C_gamma[:,degen_mask].conj().T)
-            assert(abs(f.imag).max() < 1e-4)
-
-            e, na_orb = scipy.linalg.eigh(f.real, s, type=2)
-            C_gamma = C_gamma.real
-            C_gamma[:,degen_mask] = na_orb[:, e>1e-7]
-        else:
-            f = np.dot(C_gamma * E_g, C_gamma.conj().T)
-            assert(abs(f.imag).max() < 1e-4)
-            e, C_gamma = scipy.linalg.eigh(f.real, s, type=2)
-
-    s_k = cell.pbc_intor('int1e_ovlp', kpts=kpts)
-    # overlap between k-point unitcell and gamma-point supercell
-    s_k_g = np.einsum('kuv,Rk->kuRv', s_k, phase.conj()).reshape(Nk,Nao,NR*Nao)
-    # The unitary transformation from k-adapted orbitals to gamma-point orbitals
-    mo_phase = lib.einsum('kum,kuv,vi->kmi', C_k.conj(), s_k_g, C_gamma)
-
-    return scell, E_g, C_gamma, mo_phase
-    
     
 class WF:
     def __init__(self, cell, kmf, w90, chkfile=None):
@@ -157,8 +110,6 @@ class WF:
         # self.loc_actTEI_kpts = self.get_tei_kpts(kconserv, self.ao2lo)            
         # self.loc_actTEI_Ls = self.to_Ls2e(self.loc_actTEI_kpts, kconserv) 
         
-            
-        print("FROM WF", self.e_core)
         # Save integrals to chkfile:            
         # if chkfile_exist == False:
             # tchkfile.save_pdmet_int(self, chkfile)
@@ -217,6 +168,7 @@ class WF:
         '''    
     
         loc_OED_kpts = self.construct_locOED_kpts(umat, OEH_type, verbose=verbose)
+        ao_D_kpts = self.kmf.make_rdm1()
         loc_OED_Ls = self.k_to_R(loc_OED_kpts)
         return loc_OED_kpts, loc_OED_Ls
         
@@ -250,11 +202,10 @@ class WF:
         return dmetJKcore
         
     def dmet_tei(self, ao2eo):
-        '''Get embedding TEI or 2e ERI'''
-        ''' TODO: modify this to adapt it to GDF'''
+        '''Get embedding TEI with density fitting'''
         mydf = self.kmf.with_df   
-        tei = df.get_emb_ERIs(self.cell, mydf, ao2eo)
-        return tei       
+        tei = df.get_emb_eri_fast(self.cell, mydf, ao2eo)[0]       
+        return tei
         
     def get_phase(self, cell=None, kpts=None, kmesh=None):
         '''
@@ -296,14 +247,9 @@ class WF:
             m, n    : embedding indices
             capital : R-space indices 
             R, S, T : R-spacce lattice vector
-        '''
-        mo_energy = self.kmf.mo_energy
-        mo_coeff = self.ao2lo   
-        scell, E_g, C_gamma, mo_phase = mo_k2gamma(self, self.cell, mo_energy, mo_coeff, self.kpts, self.kmesh)
-            
-        # emb_orbs_Ls = emb_orbs.reshape(self.nLs, self.nactorbs, Norb_in_imp)
-        # lo2eo = np.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs_Ls) 
-        lo2eo = np.einsum('kiI, Im -> kim', mo_phase, emb_orbs) 
+        ''' 
+        emb_orbs_Ls = emb_orbs.reshape(self.nLs, self.nactorbs, 4)
+        lo2eo = np.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs_Ls) 
         ao2eo = np.einsum('kui, kim -> kum', self.ao2lo, lo2eo) 
         return ao2eo
 
@@ -329,41 +275,12 @@ class WF:
         '''
         return libdmet.iFT1e_sparse(self.nkpts, kpt, self.nLs, self.Ls, Mat_kpt).real     
 
-    def to_Ls2e(self, Mijk, kconserv):
-        '''
-        Transform an one-electron matrix M_{pqrs}(ijkl) to the L-space
-        Note: The momentum conservation requires: j - i + l - k = 0
-        '''
-        return libdmet.iFFT2e(self.tmap, self.phase, kconserv, Mijk).real           
-
     def to_local(self, Mk, ao2lo=None):
         '''
         Transform an one-electron operator M_{pq}(k) in the ao basis to the local basis
         '''      
         if ao2lo is None: ao2lo = self.ao2lo
-        return np.einsum('kui,kuv,kvj->kij', ao2lo.conj(), Mk, ao2lo)
-
-    def get_tei_kpts(self, kconserv, ao2lo):
-        '''
-        Get TEI at sampled k-point g_pqrs^{ijkl}
-        Note:
-            - the momentum conservation requires: j - i + l - k = G, G = 0 if i,j,k,l \subset the reciprocal unit cell
-        '''
-        
-        TEIijk = np.zeros([self.nkpts,self.nkpts,self.nkpts,self.nactorbs,self.nactorbs,self.nactorbs,self.nactorbs], dtype = np.complex128)
-        for i in range(self.nkpts):
-            for j in range(self.nkpts):
-                for k in range(self.nkpts):            
-                    l = kconserv[i,j,k]    
-                    ki, COi = self.kpts[i], ao2lo[i]
-                    kj, COj = self.kpts[j], ao2lo[j]
-                    kk, COk = self.kpts[k], ao2lo[k]
-                    kl, COl = self.kpts[l], ao2lo[l]                
-                    TEI = self.kmf.with_df.ao2mo([COi,COj,COk,COl], [ki,kj,kk,kl], compact = False)
-                    TEIijk[i,j,k] = TEI.reshape(self.nactorbs,self.nactorbs,self.nactorbs,self.nactorbs)
-                    
-        return TEIijk
-         
+        return np.einsum('kui,kuv,kvj->kij', ao2lo.conj(), Mk, ao2lo) 
         
     def make_tmap(self, kmesh):  
         '''Exploring translational symmetry
@@ -386,22 +303,66 @@ class WF:
                     
         return map
         
-    def k_to_R(self, M_kpts, mo=True):  
-        '''Transform k-space 1e integral to R-space
+    def k_to_R(self, M_kpts):  
+        '''Transform k-space to R-space, used for both AO and LO integral/1-RDM
             u, v    : k-space ao indices 
             i, j    : k-space mo/local indices
             m, n    : embedding indices
             capital : R-space indices 
             R, S, T : R-spacce lattice vector
-           TODO: write comment
         ''' 
-        if mo == True: # MO/local integral
-            mo_energy = self.kmf.mo_energy
-            mo_coeff = self.ao2lo   
-            scell, E_g, C_gamma, mo_phase = mo_k2gamma(self, self.cell, mo_energy, mo_coeff, self.kpts, self.kmesh)
-            M_Ls = lib.einsum('kiI,kij,kjJ->IJ', mo_phase.conj(), M_kpts, mo_phase)
-        else:  # AO integral
-            M_Ls = np.einsum('Rk,kuv,Sk->RuSv', self.phase, M_kpts, self.phase.conj())
-            M_Ls = M_Ls.reshape(self.nLs*self.nao, self.nLs*self.nao)
+        M_Ls = np.einsum('Rk,kuv,Sk->RuSv', self.phase, M_kpts, self.phase.conj())
+        M_Ls = M_Ls.reshape(self.nLs*self.nao, self.nLs*self.nao)
         assert(abs(M_Ls.imag).max() < 1e-7)
         return M_Ls.real
+        
+    def get_TEI(self, ao2eo): 
+        '''Get embedding TEI without density fitting'''
+        from pyscf.pbc.tools import pbc as pbctools
+        kconserv = pbctools.get_kconserv(self.cell, self.kpts)
+        
+        Nk, nao, neo = ao2eo.shape
+        TEI = 0.0
+        for i in range(self.nkpts):
+            for j in range(self.nkpts):
+                for k in range(self.nkpts):            
+                    l = kconserv[i,j,k]    
+                    ki, COi = self.kpts[i], ao2eo[i]
+                    kj, COj = self.kpts[j], ao2eo[j]
+                    kk, COk = self.kpts[k], ao2eo[k]
+                    kl, COl = self.kpts[l], ao2eo[l]                
+                    TEI += self.kmf.with_df.ao2mo([COi,COj,COk,COl], [ki,kj,kk,kl], compact = False)
+                    
+        return TEI.reshape(neo,neo,neo,neo).real/self.nLs
+        
+    def get_loc_TEI(self, ao2lo=None):  
+        '''Get local TEI in R-space without density fitting''' 
+        
+        from pyscf.pbc.tools import pbc as pbctools
+        kconserv = pbctools.get_kconserv(self.cell, self.kpts)
+        if ao2lo is None: ao2lo = self.ao2lo
+        
+        Nk, nao, nlo = ao2lo.shape
+        size = Nk*nlo
+        mo_phase = lib.einsum('kui,Rk->kuRi', ao2lo, self.phase.conj()).reshape(Nk,nao, size)
+        TEI = 0.0
+        for i in range(self.nkpts):
+            for j in range(self.nkpts):
+                for k in range(self.nkpts):            
+                    l = kconserv[i,j,k]    
+                    ki, COi = self.kpts[i], mo_phase[i]
+                    kj, COj = self.kpts[j], mo_phase[j]
+                    kk, COk = self.kpts[k], mo_phase[k]
+                    kl, COl = self.kpts[l], mo_phase[l]            
+                    TEI += self.kmf.with_df.ao2mo([COi,COj,COk,COl], [ki,kj,kk,kl], compact = False)   
+        assert(abs(TEI.imag).max() < 1e-7)
+        return TEI.reshape(size,size,size,size).real/self.nLs
+        
+    def locTEI_to_dmetTEI(self, locTEI, emb_orbs):
+        '''Transform local TEI in R-space to embedding space''' 
+        nao,neo = emb_orbs.shape
+        tei = ao2mo.incore.full(ao2mo.restore(8, locTEI, nao), emb_orbs, compact=False)
+        tei = tei.reshape(neo,neo,neo,neo)
+        return tei   
+   
+  

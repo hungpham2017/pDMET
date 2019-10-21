@@ -136,8 +136,7 @@ class QCsolvers:
         
         ERHF = self.mf.e_tot
         RDM1 = self.mf.make_rdm1()
-        JK   = self.mf.get_veff(None, dm=RDM1)   
-
+        JK   = self.mf.get_veff(None, dm=RDM1) 
         # To calculate the impurity energy, rescale the JK matrix with a factor 0.5 to avoid double counting: 0.5 * ( OEI + FOCK ) = OEI + 0.5 * JK
         if self.mol.spin == 0:        
             ImpurityEnergy = 0.5*np.einsum('ij,ij->', RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
@@ -145,16 +144,13 @@ class QCsolvers:
         else:         
             ImpurityEnergy_a = 0.5*np.einsum('ij,ij->', RDM1[0][:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
                             + 0.5*np.einsum('ij,ij->', RDM1[0][:Nimp,:], JK[0][:Nimp,:])        
-            ImpurityEnergy_b = 0.5*np.einsum('ij,ij->', RDM1[1][:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+            ImpurityEnergy_b = 0.5*np.einsum('ij,ij->', RDM1[13][:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
                             + 0.5*np.einsum('ij,ij->', RDM1[1][:Nimp,:], JK[1][:Nimp,:])
             ImpurityEnergy =  ImpurityEnergy_a + ImpurityEnergy_b     
             RDM1 = RDM1.sum(axis=0)
                 
         # Compute total energy        
         e_cell = self.kmf_ecore + ImpurityEnergy   
-
-        #DEBUG: ERHF will be removed
-        print("DEBUG ERHF", ERHF+self.kmf_ecore)
         
         return (e_cell, RDM1) 
         
