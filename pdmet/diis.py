@@ -20,6 +20,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 '''
 
 import numpy as np
+from pyscf import lib
 import time
 from pDMET.tools import tunix
      
@@ -75,7 +76,7 @@ class DIIS:
         new_umats = []       
         umat   = np.asarray(self._umat)
         errors = np.asarray(self._errors)        
-        B = np.einsum('ikab,jkba->ij', errors.transpose(0,1,3,2).conj(), errors).real  
+        B = lib.einsum('ikab,jkba->ij', errors.transpose(0,1,3,2).conj(), errors).real  
         bigB = np.zeros([dim ,dim])
         bigB[:self.nvector,:self.nvector] = B
         bigB[:self.nvector,-1] = bigB[-1, :self.nvector] = -1        
@@ -84,9 +85,9 @@ class DIIS:
         self._c = np.linalg.solve(bigB, E)[:-1] 
          
         if umat.ndim ==3:
-            new_umat = np.einsum('iab,i->ab', umat, self._c)
+            new_umat = lib.einsum('iab,i->ab', umat, self._c)
         else:
-            new_umat = np.einsum('ikab,i->kab', umat, self._c)
+            new_umat = lib.einsum('ikab,i->kab', umat, self._c)
         
         return new_umat
         

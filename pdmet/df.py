@@ -10,10 +10,6 @@ import numpy as np
 import scipy.linalg as la
 from pyscf import lib, ao2mo
 einsum = lib.einsum
-from pyscf.pbc import tools
-from pyscf.pbc.lib import kpts_helper
-
-
 
 def _pack_tril(Lij):
     if len(Lij.shape) == 3:

@@ -73,18 +73,13 @@ def save_kmf(kmf, chkfile):
                 
     save(chkfile, 'scf', kmf_dic)
     
-def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False, max_memory=4000):
+def load_kmf(cell, kmf, kmesh, chkfile, max_memory=4000):
     '''
         Save a kmf object
     '''
     
     save_kmf = load(chkfile, 'scf')
-    
-    class with_df:
-        def __init__(self, kmf, memory):
-            kmf.with_df.max_memory = memory
-            self.ao2mo = lambda COijkl, kptijkl, compact: kmf.with_df.ao2mo(COijkl, kptijkl, compact)      
-            
+     
     class fake_kmf:
         def __init__(self, save_kmf):  
             if save_kmf['exxdiv'] == 'None': 
@@ -92,7 +87,8 @@ def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False, max_memory=4000):
                 kmf.exxdiv      = None 
             else:
                 self.exxdiv     = save_kmf['exxdiv']    
-                kmf.exxdiv      = save_kmf['exxdiv']                  
+                kmf.exxdiv      = save_kmf['exxdiv']  
+                
             self.e_tot          = save_kmf['e_tot']
             self.kpts           = save_kmf['kpts']
             self.mo_occ_kpts    = save_kmf['mo_occ_kpts']
@@ -110,11 +106,9 @@ def load_kmf(cell, kmf, kmesh, chkfile, symmetrize = False, max_memory=4000):
                 self.max_memory = kmf.max_memory
             else:
                 self.max_memory = max_memory
-            self.with_df    = with_df(kmf, self.max_memory)
+            self.with_df    = kmf.with_df 
             
     final_kmf = fake_kmf(save_kmf)
-    
-    if symmetrize == True: final_kmf = symmetrize_kmf(cell, final_kmf, kmesh)
     
     return final_kmf
     

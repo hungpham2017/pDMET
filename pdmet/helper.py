@@ -101,8 +101,8 @@ def KRHF(cell, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=10):
         '''Function to compute veff from ERI'''
         delta = np.eye(nkpts) 
         weight = 1/nkpts
-        vj = weight * np.einsum('ijkpqrs,ksr,ij->ipq', TEI,dm_kpts,delta,optimize = True)
-        vk = weight * np.einsum('ijkpqrs,jqr,jk->ips', TEI,dm_kpts,delta,optimize = True)       
+        vj = weight * lib.einsum('ijkpqrs,ksr,ij->ipq', TEI,dm_kpts,delta)
+        vk = weight * lib.einsum('ijkpqrs,jqr,jk->ips', TEI,dm_kpts,delta)       
         veff = vj - 0.5*vk
         return veff
 
@@ -130,8 +130,8 @@ def KRKS(cell, XC, OEI, TEI, nelectron, kpts, DMguess, verbose=0, max_cycle=1):
         '''Function to compute veff from ERI'''
         delta = np.eye(nkpts) 
         weight = 1/nkpts
-        vj = weight * np.einsum('ijkpqrs,ksr,ij->ipq', TEI,dm_kpts,delta,optimize = True)
-        vk = weight * np.einsum('ijkpqrs,jqr,jk->ips', TEI,dm_kpts,delta,optimize = True)       
+        vj = weight * lib.einsum('ijkpqrs,ksr,ij->ipq', TEI,dm_kpts,delta)
+        vk = weight * lib.einsum('ijkpqrs,jqr,jk->ips', TEI,dm_kpts,delta)       
         veff = vj - 0.5*vk
         return veff
 

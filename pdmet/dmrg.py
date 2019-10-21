@@ -115,7 +115,7 @@ class DMRG:
                     for orb4 in range(self.norb):
                         RDM2[orb1, orb3, orb2, orb4] = theDMRG.get2DMA(orb1, orb2, orb3, orb4) #From physics to chemistry notation
 
-        RDM1 = np.einsum('ijkk->ij', RDM2)/(self.nelec - 1)
+        RDM1 = lib.einsum('ijkk->ij', RDM2)/(self.nelec - 1)
         
         # Excited state:
         if self.nroots > 1 :      
@@ -134,7 +134,7 @@ class DMRG:
                             for orb4 in range(self.norb):
                                 rdm2[orb1, orb3, orb2, orb4] = theDMRG.get2DMA(orb1, orb2, orb3, orb4) #From physics to chemistry notation
                                 
-                rdm1 = np.einsum('ijkk->ij', rdm2)/(self.nelec - 1)
+                rdm1 = lib.einsum('ijkk->ij', rdm2)/(self.nelec - 1)
                 RDM1s.append(rdm1)                
                 RDM2s.append(rdm2)    
 
