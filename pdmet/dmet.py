@@ -257,19 +257,20 @@ class pDMET:
 
         # Transform the 1e/2e integrals and the JK core constribution to schmidt basis
         emb_orbs = FBEorbs[:,:Norb_in_imp]
-        ao2eo = self.local.get_ao2eo(emb_orbs)
-        emb_OEI  = self.local.get_emb_OEI(ao2eo)
-        emb_TEI  = self.local.get_emb_TEI(ao2eo)
-        emb_1RDM =  reduce(np.dot, (emb_orbs.T, self.loc_1RDM_Rs, emb_orbs))
-        emb_coreJK = self.local.get_emb_coreJK(ao2eo, emb_TEI, emb_1RDM) 
-        
-        
+        if self.is_new_bath == True:
+            ao2eo = self.local.get_ao2eo(emb_orbs)
+            self.emb_OEI  = self.local.get_emb_OEI(ao2eo)
+            self.emb_TEI  = self.local.get_emb_TEI(ao2eo)
+            self.emb_1RDM =  reduce(np.dot, (emb_orbs.T, self.loc_1RDM_Rs, emb_orbs))
+            self.emb_coreJK = self.local.get_emb_coreJK(ao2eo, self.emb_TEI, self.emb_1RDM) 
+
+            
         # Solving the embedding problem with high level wfs
         if self._cycle == 1 : tprint.print_msg("   Embedding size: %2d electrons in (%2d fragments + %2d baths )" \
                                                                     % (Nelec_in_imp, numImpOrbs, numBathOrbs))
         
-        self.qcsolver.initialize(self.local.e_core, emb_OEI, emb_TEI, \
-                                emb_coreJK, emb_1RDM, Norb_in_imp, Nelec_in_imp, numImpOrbs, chempot)
+        self.qcsolver.initialize(self.local.e_core, self.emb_OEI, self.emb_TEI, \
+                                self.emb_coreJK, self.emb_1RDM, Norb_in_imp, Nelec_in_imp, numImpOrbs, chempot)
         if self.solver == 'HF':
             e_cell, RDM1 = self.qcsolver.HF()
         elif self.solver in ['CASCI','CASSCF']:
@@ -310,6 +311,7 @@ class pDMET:
         self.loc_1RDM_Rs = self.local.make_loc_1RDM_Rs(self.umat, 'FOCK')[1]        
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.loc_1RDM_Rs)
         self.baths = schmidt.baths(self.bath_truncation) 
+        self.is_new_bath = True
         solver = self.solver
         self.solver = 'HF'
         nelec_cell = self.kernel(chempot = 0.0, check=True)
@@ -346,13 +348,14 @@ class pDMET:
         self._cycle = 1       
         # Optimize the chemical potential 
         if loc_1RDM_Rs is not None:
-            self.loc_1RDM_Rs = locOED_Rs
+            self.loc_1RDM_Rs = loc_1RDM_Rs
         else:
             self.loc_1RDM_Rs = self.local.make_loc_1RDM_Rs(self.umat, self.OEH_type)[1]        # get both MO coefficients and 1-RDM in the local basis
         
         schmidt = schmidtbasis.HF_decomposition(self.cell, self.impCluster, self.nBathOrbs, self.loc_1RDM_Rs)
-        self.baths = schmidt.baths(self.bath_truncation) 
-        self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)        
+        self.baths = schmidt.baths(self.bath_truncation)
+        self.is_new_bath = True
+        self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)
         
         tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_cell))
         tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))                          
@@ -535,6 +538,7 @@ class pDMET:
         '''
         
         Nelec_dmet = self.kernel(chempot)
+        self.is_new_bath = False
         Nelec_target = self.Nelecs // self.Nkpts   
         print ("     Cycle %2d. Chem potential: %12.8f | Elec/cell = %12.8f | <S^2> = %12.8f" % \
                                                         (self._cycle, chempot, Nelec_dmet, self.qcsolver.SS))                                                                                
@@ -567,8 +571,8 @@ class pDMET:
         ref: J. Chem. Theory Comput. 2016, 12, 2706−2719
         '''
         uvec = uvec
-        rdm_diff, locOED_kpts = self.rdm_diff(uvec)   
-        rdm_diff_gradient = self.rdm_diff_gradient(uvec, locOED_kpts)  
+        rdm_diff, loc_1RDM_kpts = self.rdm_diff(uvec)   
+        rdm_diff_gradient = self.rdm_diff_gradient(uvec, loc_1RDM_kpts)  
         CF_gradient = np.zeros(self.kNterms)
         
         for u in range(self.kNterms):
@@ -579,8 +583,8 @@ class pDMET:
         '''TODO
         '''
         uvec = uvec
-        rdm_diff, locOED_kpts = self.glob_rdm_diff(uvec)   
-        rdm_diff_gradient = self.glob_rdm_diff_gradient(uvec, locOED_kpts)  
+        rdm_diff, loc_1RDM_kpts = self.glob_rdm_diff(uvec)   
+        rdm_diff_gradient = self.glob_rdm_diff_gradient(uvec, loc_1RDM_kpts)  
         CF_gradient = np.zeros(self.kNterms)
         
         for u in range(self.kNterms):
@@ -595,18 +599,18 @@ class pDMET:
         Return:
             error            : an array of errors for the unit cell.
         '''
-        locOED_kpts, locOED = self.local.make_loc_1RDM_Rs(self.uvec2umat(uvec), self.OEH_type)
+        loc_1RDM_kpts, loc_1RDM = self.local.make_loc_1RDM_Rs(self.uvec2umat(uvec), self.OEH_type)
         if self.SC_CFtype in ['F', 'diagF']:        
-            mf_1RDM = reduce(np.dot, (self.emb_orbs[:,:self.nImps].T, locOED, self.emb_orbs[:,:self.nImps]))
+            mf_1RDM = reduce(np.dot, (self.emb_orbs[:,:self.nImps].T, loc_1RDM, self.emb_orbs[:,:self.nImps]))
             corr_1RDM = self.emb_1RDM[:self.nImps,:self.nImps]              
         elif self.SC_CFtype in ['FB', 'diagFB']:  
-            mf_1RDM = reduce(np.dot, (self.emb_orbs.T, locOED, self.emb_orbs))
+            mf_1RDM = reduce(np.dot, (self.emb_orbs.T, loc_1RDM, self.emb_orbs))
             corr_1RDM = self.emb_1RDM    
             
         error = mf_1RDM - corr_1RDM
         if self.SC_CFtype in ['diagF', 'diagFB']: error = np.diag(error)      
         
-        return error, locOED_kpts
+        return error, loc_1RDM_kpts
 
     def glob_rdm_diff(self, uvec):
         '''
@@ -616,12 +620,12 @@ class pDMET:
         Return:
             error            : an array of errors for the unit cell.
         '''
-        locOED_kpts, locOED = self.local.make_loc_1RDM_Rs(self.uvec2umat(uvec), self.OEH_type)
+        loc_1RDM_kpts, loc_1RDM = self.local.make_loc_1RDM_Rs(self.uvec2umat(uvec), self.OEH_type)
         corr_1RDM = self.construct_global_1RDM()
-        error = locOED - corr_1RDM   
-        return error, locOED_kpts
+        error = loc_1RDM - corr_1RDM   
+        return error, loc_1RDM_kpts
         
-    def rdm_diff_gradient(self, uvec, locOED_kpts):
+    def rdm_diff_gradient(self, uvec, loc_1RDM_kpts):
         '''
         Compute the rdm_diff gradient
         Args:
@@ -632,7 +636,7 @@ class pDMET:
                              
         '''
         
-        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, locOED_kpts)
+        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, loc_1RDM_kpts)
         the_gradient = []    
         if self.umat_kpt == True:
             for i, kpt in enumerate(self.kpts_irred):   # this is k1 index of u, RDM_deriv(k0) is non zero only when k0 = k1 = kpt
@@ -656,7 +660,7 @@ class pDMET:
         
         return the_gradient
 
-    def glob_rdm_diff_gradient(self, uvec, locOED_kpts):
+    def glob_rdm_diff_gradient(self, uvec, loc_1RDM_kpts):
         '''
         Compute the rdm_diff gradient
         Args:
@@ -667,7 +671,7 @@ class pDMET:
                              
         '''
         
-        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, locOED_kpts)
+        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, loc_1RDM_kpts)
         the_gradient = []    
         if self.umat_kpt == True:
             for u in range(self.Nterms):  
@@ -691,7 +695,7 @@ class pDMET:
         if self.OEH_type == 'FOCK':
             OEH = self.local.loc_actFOCK_kpts #+umat
             OEH = self.local.k_to_R(OEH)
-            e_fun = np.trace(OEH.dot(locOED_Rs))
+            e_fun = np.trace(OEH.dot(loc_1RDM_Rs))
         else: 
             print('Other type of 1e electron is not supported')
           
@@ -824,7 +828,7 @@ class pDMET:
         H1col   = np.array(H1col)    
         return theH1, H1start, H1row, H1col
         
-    def construct_1RDM_response_kpts(self, uvec, locOED_kpts=None):
+    def construct_1RDM_response_kpts(self, uvec, loc_1RDM_kpts=None):
         '''
         Calculate the derivative of 1RDM
         '''

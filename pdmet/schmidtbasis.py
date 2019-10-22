@@ -60,6 +60,15 @@ class HF_decomposition:
         eigenvals, eigenvecs = np.linalg.eigh(embedding1RDM, UPLO='U')      # 0 <= eigenvals <= 2        
         idx = np.maximum(-eigenvals, eigenvals - 2.0).argsort() # Occupation numbers closest to 1 come first
 
+
+        # DEBUG:
+        # u, s, vh = np.linalg.svd(OneDM[:,2:])
+        # print(vh.T)
+        # print(eigenvecs)
+        # print(eigenvals)
+        # print(s)
+
+
         if threshold == False:
             tokeep = numBathOrbs
         else:
