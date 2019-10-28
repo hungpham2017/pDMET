@@ -30,7 +30,7 @@ from pDMET.lib.build import libdmet
 
     
     
-class WF:
+class Local:
     def __init__(self, cell, kmf, w90, chkfile=None):
         '''
         TODO: need to be written
@@ -63,9 +63,10 @@ class WF:
 
         for orb in range(cell.nao_nr()):
             if (orb+1) not in w90.exclude_bands: self.active[orb] = 1  
-        nelec_active = np.int32(cell.nelectron - np.sum(kmf.mo_occ_kpts[0][self.active==0]))        
-        self.nelec = self.Nkpts * nelec_active              # per computional super cell
+        self.nelec_per_cell = np.int32(cell.nelectron - np.sum(kmf.mo_occ_kpts[0][self.active==0]))     
+        self.nelec_total = self.Nkpts * self.nelec_per_cell             # per computional super cell
 
+        
         full_OEI_k = kmf.get_hcore()
         mo_k = kmf.mo_coeff_kpts
         coreDM_kpts = []
@@ -112,7 +113,7 @@ class WF:
             idx_kpts = eigvals.argsort()
             eigvals = np.asarray([eigvals[kpt][idx_kpts[kpt]] for kpt in range(self.Nkpts)])
             eigvecs = np.asarray([eigvecs[kpt][:,idx_kpts[kpt]] for kpt in range(self.Nkpts)])
-            mo_occ = helper.get_occ_r(self.nelec, eigvals)  
+            mo_occ = helper.get_occ_r(self.nelec_total, eigvals)  
             loc_OED = np.asarray([np.dot(eigvecs[kpt][:,mo_occ[kpt]>0]*mo_occ[kpt][mo_occ[kpt]>0], eigvecs[kpt][:,mo_occ[kpt]>0].T.conj())
                                                 for kpt in range(self.Nkpts)], dtype=np.complex128)       
             
@@ -121,20 +122,19 @@ class WF:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
         
-    def make_loc_1RDM_Rs(self, umat, OEH_type='FOCK'):
+    def make_loc_1RDM(self, umat, OEH_type='FOCK'):
         '''
-        Construct MOs/one-electron density matrix dm_{pq}^{0L} at each lattice vector
-        with a certain k-independent correlation potential umat
+        Construct the local 1-RDM at the reference unit cell
         '''    
     
         loc_1RDM_kpts = self.make_loc_1RDM_kpts(umat, OEH_type)
-        loc_1RDM_Rs = self.k_to_R(loc_1RDM_kpts)
-        return loc_1RDM_kpts, loc_1RDM_Rs
+        loc_1RDM_R0 = self.k_to_R0(loc_1RDM_kpts)
+        return loc_1RDM_kpts, loc_1RDM_R0
         
     def get_emb_OEI(self, ao2eo):
         '''Get embedding OEI'''
         OEI = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.actOEI_kpts, ao2eo)
-        self.is_real(OEI.imag)
+        self.is_real(OEI)
         return OEI.real
 
     def get_emb_FOCK(self, ao2eo):
@@ -144,10 +144,17 @@ class WF:
         return FOCK.real
 
     def get_emb_JK(self, ao2eo):
-        '''Get embedding JK used to get core JK in embedding space without explicitly computing core JK in local space'''    
+        '''Get embedding JK used to get core JK in embedding space without explicitly computing core JK in local space'''   
         emb_JK = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.actJK_kpts, ao2eo)
-        self.is_real(emb_JK.imag)
+        self.is_real(emb_JK)
         return emb_JK.real 
+        
+    def get_emb_1RDM(self, loc_1RDM_kpts, emb_orbs):
+        '''Get 1-RDM rotated in the embedding space'''   
+        lo2eo = lib.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs) 
+        emb_1RDM = lib.einsum('kum,kuv,kvn->mn', lo2eo.conj(), loc_1RDM_kpts, lo2eo)
+        self.is_real(emb_1RDM)
+        return emb_1RDM.real 
 
     def get_emb_coreJK(self, ao2eo, emb_TEI, emb_1RDM):
         '''Get embedding core JK'''
@@ -202,24 +209,23 @@ class WF:
                     kk, COk = self.kpts[k], mo_phase[k]
                     kl, COl = self.kpts[l], mo_phase[l]            
                     TEI += self.kmf.with_df.ao2mo([COi,COj,COk,COl], [ki,kj,kk,kl], compact = False)   
-        self.is_real(TEI.imag)
+        self.is_real(TEI)
         return TEI.reshape(size,size,size,size).real/Nkpts
         
     def locTEI_to_dmetTEI(self, loc_TEI, emb_orbs):
         '''Transform local TEI in R-space to embedding space''' 
-        nao,neo = emb_orbs.shape
+        NRs, nlo, neo = emb_orbs.shape
+        emb_orbs = emb_orbs.reshape([NRs*nlo,neo])
         TEI = ao2mo.incore.full(ao2mo.restore(8, loc_TEI, nao), emb_orbs, compact=False)
         TEI = TEI.reshape(neo,neo,neo,neo)
         return TEI  
         
-    def get_global_1RDM(self, imp_1RDM):
+    def get_1RDM_Rs(self, imp_1RDM):
         '''Construct a R-space 1RDM from the reference cell 1RDM''' 
-        nlo = imp_1RDM.shape[0]
-        NRs = self.Nkpts
-        imp_1RDM = imp_1RDM.reshape(nlo,NRs,nlo).transpose(1,0,2)
+        NRs, nlo = imp_1RDM.shape[:2]
         imp_1RDM_kpts = lib.einsum('Rij,Rk->kij', imp_1RDM, self.phase)*np.sqrt(self.Nkpts)
-        global_1RDM = self.k_to_R(imp_1RDM_kpts)
-        return global_1RDM 
+        RDM1_Rs = self.k_to_R(imp_1RDM_kpts)
+        return RDM1_Rs
         
     def get_phase(self, cell=None, kpts=None, kmesh=None):
         '''
@@ -261,10 +267,7 @@ class WF:
             capital : R-space indices 
             R, S, T : R-spacce lattice vector
         ''' 
-        NRs, Nkpts = self.phase.shape
-        nemb = emb_orbs.shape[1]
-        emb_orbs_Rs = emb_orbs.reshape(NRs, self.nlo, nemb)
-        lo2eo = lib.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs_Rs) 
+        lo2eo = lib.einsum('Rk, Rim -> kim', self.phase.conj(), emb_orbs) 
         ao2eo = lib.einsum('kui, kim -> kum', self.ao2lo, lo2eo) 
         return ao2eo   
 
@@ -289,6 +292,22 @@ class WF:
         M_Rs = M_Rs.reshape(NRs*nao, NRs*nao)
         self.is_real(M_Rs)
         return M_Rs.real
+        
+    def k_to_R0(self, M_kpts):  
+        '''Transform AO or LO integral/1-RDM in k-space to the reference unit cell
+            u, v    : k-space ao indices 
+            i, j    : k-space mo/local indices
+            m, n    : embedding indices
+            capital : R-space indices 
+            R, S, T : R-spacce lattice vector
+            
+            M(k) -> M(0,R) with index Ruv
+        ''' 
+        NRs, Nkpts = self.phase.shape
+        nao = M_kpts.shape[-1]
+        M_R0 = lib.einsum('Rk,kuv,k->Ruv', self.phase, M_kpts, self.phase[0].conj())
+        self.is_real(M_R0)
+        return M_R0.real
         
     def R_to_k(self, M_Rs):  
         '''Transform AO or LO integral/1-RDM in R-space to k-space 

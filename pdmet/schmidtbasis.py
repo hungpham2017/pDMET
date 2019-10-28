@@ -22,94 +22,43 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 import numpy as np
 from pDMET.lib.build import libdmet
     
-class HF_decomposition:
-    def __init__(self, cell, impOrbs, numBathOrbs, locOED_Ls):    
-        self.cell = cell
-        self.impOrbs = impOrbs
-        self.numBathOrbs = numBathOrbs        
-        self.locOED_Ls = locOED_Ls
         
-    def baths(self, threshold):
-        '''
-        This function is used to call the Schmidt basis using 1-rdm
-        '''                  
-        return self.UsingOED(self.numBathOrbs, threshold = threshold)
             
-    def UsingOED(self, numBathOrbs, threshold = 1e-8):
-        '''
-        Construct the RHF bath using one-electron density matrix (OED)
-        This function is a modified version of qcdmethelper/constructbath funtion 
-        in the QC-DMET <Copyright (C) 2015 Sebastian Wouters>
-        ref: 
-            J. Chem. Theory Comput. 2016, 12, 2706−2719
-            
-        This should work for an KROHF wfs too, resulting in an ROHF bath  with the number of bath orbitals: num_impurity + 2S          
-        '''    
+def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None):
+    '''
+    Construct the RHF bath using the 1RDM for reference unit cell
+    ref: 
+        J. Chem. Theory Comput. 2s016, 12, 2706−2719
         
-        OneDM = self.locOED_Ls    
-        impurityOrbs = np.asarray(self.impOrbs)
-        embeddingOrbs = 1 - impurityOrbs
-        if (embeddingOrbs.shape[0] > 1):
-            embeddingOrbs = embeddingOrbs.T        
-        embeddingOrbs = np.matrix(embeddingOrbs)                 #Converse embeddingOrbs to a matrix (1, x)
-        isEmbedding = np.dot(embeddingOrbs.T , embeddingOrbs) == 1
-        numEmbedOrbs = np.sum(embeddingOrbs, dtype = np.int64)
-        embedding1RDM = np.reshape(OneDM[isEmbedding], (numEmbedOrbs, numEmbedOrbs))   
-        numImpOrbs   = np.sum(impurityOrbs, dtype = np.int64)
-        numTotalOrbs = len(impurityOrbs)
-        eigenvals, eigenvecs = np.linalg.eigh(embedding1RDM, UPLO='U')      # 0 <= eigenvals <= 2        
-        idx = np.maximum(-eigenvals, eigenvals - 2.0).argsort() # Occupation numbers closest to 1 come first
-
-
-        # DEBUG:
-        # u, s, vh = np.linalg.svd(OneDM[:,2:])
-        # print(vh.T)
-        # print(eigenvecs)
-        # print(eigenvals)
-        # print(s)
-
-
-        if threshold == False:
-            tokeep = numBathOrbs
-        else:
-            tokeep = np.sum(-np.maximum(-eigenvals, eigenvals - 2.0)[idx] > threshold)
-            if tokeep < numBathOrbs:
-                print ("   Bath construction: Throw out", numBathOrbs - tokeep, "orbitals using the threshold", threshold)
-                
-        numBathOrbs = min(np.sum(tokeep), numBathOrbs)
-        
-        eigenvals = eigenvals[idx]
-        eigenvecs = eigenvecs[:,idx]
-        pureEnvals = eigenvals[numBathOrbs:]
-        pureEnorbs = eigenvecs[:,numBathOrbs:]
-        idx = (-pureEnvals).argsort()
-        eigenvecs[:,numBathOrbs:] = pureEnorbs[:,idx]
-        pureEnvals = pureEnvals[idx]
-        coreOccupations = np.hstack((np.zeros([numImpOrbs + numBathOrbs]), pureEnvals)) #Use to calculate the 1e rdm of core orbitals
-
-        # Reconstruct the fragment orbitals so that the density matrix has a trivial form:
-        embeddingOrbs_frag = np.matrix(impurityOrbs)                 #Converse embeddingOrbs to a matrix (1, x)
-        isEmbedding_frag = np.dot(embeddingOrbs_frag.T , embeddingOrbs_frag) == 1
-        numEmbedOrbs_frag = np.sum(embeddingOrbs_frag, dtype = np.int32)
-        embedding1RDM_frag = np.reshape(OneDM[isEmbedding_frag], (numEmbedOrbs_frag, numEmbedOrbs_frag))
-        eigenvals_frag, eigenvecs_frag = np.linalg.eigh(embedding1RDM_frag)      # 0 <= eigenvals <= 2
-
-        #Debug: rotate the fragment orbitals among themselves
-        if False: eigenvecs_frag = np.eye(eigenvecs_frag.shape[0],eigenvecs_frag.shape[0])
-        
-        #Fragment orbitals: stack columns with zeros in the end
-        #Embedding orbitals: stack columns with zeros in the beginning    
-        eigenvecs_frag = np.hstack((eigenvecs_frag, np.zeros((numImpOrbs, numEmbedOrbs)))) 
-        eigenvecs = np.hstack((np.zeros((numEmbedOrbs, numImpOrbs)), eigenvecs))
-        row = 0
-        for ao in range(0, numTotalOrbs):
-            if impurityOrbs[ao]:
-                eigenvecs = np.insert(eigenvecs, ao, eigenvecs_frag[row], axis=0)
-                row += 1
+    This should work for an KROHF wfs too, resulting in an ROHF bath  with the number of bath orbitals: num_impurity + 2S          
     
-        # Orthonormality is guaranteed due to (1) stacking with zeros and (2) orthonormality eigenvecs for symmetric matrix
-        assert(np.linalg.norm(np.dot(eigenvecs.T, eigenvecs) - np.identity(numTotalOrbs)) < 1e-12 )
+    Attributes:
+        supercell_1RDM_{0,L}        : the 1-RDM of the reference unit cell
+    '''    
+    NR, Nimp, Nimp = supercell_1RDM.shape
+    Nlo = NR * Nimp
+    if imp_indices is None:
+        supercell_1RDM = supercell_1RDM.reshape(Nlo, Nimp)
+        emb_1RDM = supercell_1RDM[Nimp:,:]      
+    else:
+        imp_indices = np.asarray(imp_indices)
+        env_indices = np.matrix(1 - imp_indices)   
+        frag_env_mask = imp_indices.T.dot(env_indices) == 1
+        Nimp = np.int32(imp_indices.sum())
+        Nenv = Nlo - Nimp
+        emb_1RDM = supercell_1RDM[0][frag_env_block].reshape(Nimp, Nenv) 
     
-        return (numBathOrbs, eigenvecs, coreOccupations)
+    U, sigma, Vh = np.linalg.svd(emb_1RDM, full_matrices=False)
+    distance_from_1 = np.abs(np.sqrt(np.abs(1-sigma**2)))
+    idx = (distance_from_1).argsort()
+    sigma = sigma[idx]
+    V = Vh.T[:,idx]
+    
+    # Assemble the embedding orbitals
+    emb_orbs = np.zeros([Nlo,2*Nimp])
+    emb_orbs[:Nimp,:Nimp] = V           # impurity orbitals
+    emb_orbs[Nimp:,Nimp:] = U           # bath orbitals
+    
+    assert(np.linalg.norm(np.dot(emb_orbs.T, emb_orbs) - np.identity(2*Nimp)) < 1e-12 ), "WARNING: The embedding orbitals is not orthogonal"
 
-        
+    return emb_orbs

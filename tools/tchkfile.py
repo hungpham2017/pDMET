@@ -199,12 +199,8 @@ def save_pdmet(pdmet, chkfile):
     chempot       = pdmet.chempot      
     uvec          = pdmet.uvec 
     umat          = pdmet.umat     
-    kmesh_sym     = 'False'
-    if pdmet.kmesh_sym: kmesh_sym   = 'True'    
     emb_orbs      = pdmet.emb_orbs
-    env_orbs      = pdmet.env_orbs
     mf_mo         = pdmet.qcsolver.mf.mo_coeff
-    core1RDMloc   = pdmet.core1RDM_local 
     actv1RDMloc   = pdmet.emb_1RDM 
     
     if pdmet.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:
@@ -215,11 +211,8 @@ def save_pdmet(pdmet, chkfile):
                  'chempot'          : chempot,                
                  'uvec'             : uvec,
                  'umat'             : umat,                 
-                 'kmesh_sym'        : kmesh_sym,
-                 'emb_orbs'         : emb_orbs,
-                 'env_orbs'         : env_orbs,                 
+                 'emb_orbs'         : emb_orbs,                
                  'mf_mo'            : mf_mo,
-                 'core1RDMloc'      : core1RDMloc,
                  'actv1RDMloc'      : actv1RDMloc}
                  
     if pdmet.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:
@@ -237,9 +230,7 @@ def load_pdmet(chkfile):
             self.chempot     = 0
             self.uvec        = False 
             self.umat        = False         
-            self.kmesh_sym   = None 
-            self.emb_orbs    = None    
-            self.env_orbs    = None             
+            self.emb_orbs    = None               
             self.mf_mo       = None
             self.mc_mo       = None     
             self.mc_mo_nat   = None   
@@ -248,12 +239,8 @@ def load_pdmet(chkfile):
                 self.chempot     = save_pdmet['chempot']
                 self.uvec        = save_pdmet['uvec']
                 self.umat        = save_pdmet['umat']                  
-                self.kmesh_sym   = False
-                if save_pdmet['kmesh_sym'] == 'True': self.kmesh_sym  = True
-                self.emb_orbs    = save_pdmet['emb_orbs']              
-                self.env_orbs    = save_pdmet['env_orbs']                   
-                self.mf_mo       = save_pdmet['mf_mo'] 
-                self.core1RDMloc = save_pdmet['core1RDMloc']          
+                self.emb_orbs    = save_pdmet['emb_orbs']                             
+                self.mf_mo       = save_pdmet['mf_mo']        
                 self.actv1RDMloc = save_pdmet['actv1RDMloc'] 
                 if self.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:              
                     self.mc_mo          = save_pdmet['mc_mo']                   
