@@ -159,12 +159,11 @@ class pDMET:
         # -------------------------------------------------        
         # Correlation/chemical potential
         if self.alt_CF == True: 
-            self.SC_CFtype = 'F' 
-            self.CF      = self.costfunction2
-            self.CF_grad = self.costfunction_gradient2            
+            #TODO: debugging the alternative cost function, this will be updated
+            pass
         else:
-            self.CF = self.costfunction            
-            self.CF_grad = self.costfunction_gradient  
+            self.CF = self.cost_func            
+            self.CF_grad = self.cost_func_grad  
             
         self.H1start, self.H1row, self.H1col = self.make_H1()[1:4]    #Use in the calculation of 1RDM derivative
         if self.SC_CFtype in ['diagF', 'diagFB']: 
@@ -236,17 +235,16 @@ class pDMET:
         '''            
         
         Nimp = self.Nimp        
-        emb_orbs = self.emb_orbs
         Nemb  = 2 * Nimp
         Nelec_in_emb = Nemb
         assert(Nemb <= self.Norbs)             
 
         # Transform the 1e/2e integrals and the JK core constribution to schmidt basis
         if self.is_new_bath == True:
-            ao2eo = self.local.get_ao2eo(emb_orbs)
+            ao2eo = self.local.get_ao2eo(self.emb_orbs)
             self.emb_OEI  = self.local.get_emb_OEI(ao2eo)
             self.emb_TEI  = self.local.get_emb_TEI(ao2eo)
-            self.emb_1RDM = self.local.get_emb_1RDM(self.loc_1RDM_kpts, emb_orbs)
+            self.emb_1RDM = self.local.get_emb_1RDM(self.loc_1RDM_kpts, self.emb_orbs)
             self.emb_coreJK = self.local.get_emb_coreJK(ao2eo, self.emb_TEI, self.emb_1RDM) 
 
         # Solving the embedding problem with high level wfs
@@ -273,7 +271,6 @@ class pDMET:
         
         if check == False:       # pDMET attributes are not updated when check_exact function is called
             self.emb_1RDM = RDM1
-            self.emb_orbs = emb_orbs    
             self.nelec_per_cell = np.trace(RDM1[:Nimp,:Nimp])
     
         if not np.isclose(self._SS, self.qcsolver.SS): 
@@ -342,7 +339,7 @@ class pDMET:
         self.is_new_bath = True
         
         # Optimize the chemical potential
-        self.chempot = optimize.newton(self.nelec_costfunction, self.chempot)
+        self.chempot = optimize.newton(self.nelec_cost_func, self.chempot)
         
         tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_per_cell))
         tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))                          
@@ -489,7 +486,7 @@ class pDMET:
         tprint.print_msg("- SELF-CONSISTENT p-DMET CALCULATION ... DONE -")
         tprint.print_msg("--------------------------------------------------------------------")  
         
-    def nelec_costfunction(self, chempot):
+    def nelec_cost_func(self, chempot):
         '''
         The different in the correct number of electrons (provided) and the calculated one 
         '''
@@ -502,7 +499,7 @@ class pDMET:
         if self.chkfile is not None: tchkfile.save_pdmet(self, self.chkfile)
         return nelec_per_cell_from_embedding - self.Nelec_per_cell
 
-    def costfunction(self, uvec):
+    def cost_func(self, uvec):
         '''
         Cost function: \mathbf{CF}(u) = \mathbf{\Sigma}_{rs} (D^{mf}_{rs}(u) - D^{corr}_{rs})^2
         where D^{mf} and D^{corr} are the mean-field and correlated 1-RDM, respectively.
@@ -512,37 +509,37 @@ class pDMET:
         cost = np.power(rdm_diff, 2).sum()  
         return cost
         
-    def glob_costfunction(self, uvec):
+    def glob_cost_func(self, uvec):
         '''TODO write it 
         '''
         rdm_diff = self.glob_rdm_diff(uvec)[0]
         cost = np.power(rdm_diff, 2).sum()
         return cost 
         
-    def costfunction_gradient(self, uvec):
+    def cost_func_grad(self, uvec):
         '''
         Analytical derivative of the cost function,
         deriv(CF(u)) = Sum^x [Sum_{rs} (2 * rdm_diff^x_{rs}(u) * deriv(rdm_diff^x_{rs}(u))]
         ref: J. Chem. Theory Comput. 2016, 12, 2706−2719
         '''
         rdm_diff, loc_1RDM_kpts = self.rdm_diff(uvec)   
-        rdm_diff_gradient = self.rdm_diff_gradient(uvec, loc_1RDM_kpts)  
-        CF_gradient = np.zeros(self.Nterms)
+        rdm_diff_grad = self.rdm_diff_grad(uvec, loc_1RDM_kpts)  
+        CF_grad = np.zeros(self.Nterms)
         
         for u in range(self.Nterms):
-            CF_gradient[u] = np.sum(2 * rdm_diff * rdm_diff_gradient[u])
-        return CF_gradient
+            CF_grad[u] = np.sum(2 * rdm_diff * rdm_diff_grad[u])
+        return CF_grad
         
-    def glob_costfunction_gradient(self, uvec):
+    def glob_cost_func_grad(self, uvec):
         '''TODO
         '''
         rdm_diff, loc_1RDM_kpts = self.glob_rdm_diff(uvec)   
-        rdm_diff_gradient = self.glob_rdm_diff_gradient(uvec, loc_1RDM_kpts)  
-        CF_gradient = np.zeros(self.kNterms)
+        rdm_diff_grad = self.glob_rdm_diff_grad(uvec, loc_1RDM_kpts)  
+        CF_grad = np.zeros(self.kNterms)
         
         for u in range(self.kNterms):
-            CF_gradient[u] = np.sum(2 * rdm_diff * rdm_diff_gradient[u])
-        return CF_gradient
+            CF_grad[u] = np.sum(2 * rdm_diff * rdm_diff_grad[u])
+        return CF_grad
         
     def rdm_diff(self, uvec):
         '''
@@ -579,7 +576,7 @@ class pDMET:
         error = loc_1RDM - corr_1RDM   
         return error, loc_1RDM_kpts
         
-    def rdm_diff_gradient(self, uvec, loc_1RDM_kpts):
+    def rdm_diff_grad(self, uvec, loc_1RDM_kpts):
         '''
         Compute the rdm_diff gradient
         Args:
@@ -590,7 +587,7 @@ class pDMET:
                              
         '''
         
-        RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, loc_1RDM_kpts)
+        RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec)
         the_gradient = []    
 
         for u in range(self.Nterms):
@@ -604,7 +601,7 @@ class pDMET:
         
         return the_gradient
 
-    def glob_rdm_diff_gradient(self, uvec, loc_1RDM_kpts):
+    def glob_rdm_diff_grad(self, uvec, loc_1RDM_kpts):
         '''
         Compute the rdm_diff gradient
         Args:
@@ -615,7 +612,7 @@ class pDMET:
                              
         '''
         
-        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec, loc_1RDM_kpts)
+        the_RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec)
         the_gradient = []    
 
         for u in range(self.Nterms):
@@ -624,7 +621,7 @@ class pDMET:
         
         return the_gradient
         
-    def alt_costfunction(self, uvec):
+    def alt_cost_func(self, uvec):
         '''
         TODO: DEBUGGING
         '''
@@ -643,7 +640,7 @@ class pDMET:
 
         return -e_fun-e_cstr   
         
-    def alt_costfunction_gradient(self, uvec):
+    def alt_cost_func_grad(self, uvec):
         '''
         TODO: DEBUGGING
         '''
@@ -743,7 +740,7 @@ class pDMET:
         H1col   = np.array(H1col)    
         return theH1, H1start, H1row, H1col
         
-    def construct_1RDM_response_kpts(self, uvec, loc_1RDM_kpts=None):
+    def construct_1RDM_response_kpts(self, uvec):
         '''
         Calculate the derivative of 1RDM
         '''
@@ -777,11 +774,11 @@ class pDMET:
         # Compute the total DM in the local basis
         uvec = np.zeros(self.Nterms, dtype=np.float64) 
         if alt_CF:
-            CF = self.alt_costfunction
-            CF_grad = None #self.alt_costfunction_gradient
+            CF = self.alt_cost_func
+            CF_grad = self.alt_cost_func_grad
         else:
-            CF = self.glob_costfunction
-            CF_grad = None  #self.glob_costfunction_gradient
+            CF = self.glob_cost_func
+            CF_grad = self.glob_cost_func_grad
        
         result = optimize.minimize(CF, uvec, method=method, jac=CF_grad, options={'disp': False, 'gtol': 1e-6})
         uvec = result.x
@@ -822,7 +819,7 @@ class pDMET:
         Hcore = self.local.loc_actOEI_Rs.copy()
         
         # 2-ERI
-        TEI 
+        TEI = self.local.get_loc_TEI()
         
         from pyscf import gto, scf,ao2mo        
         mol = gto.Mole()

@@ -212,7 +212,7 @@ class Local:
         self.is_real(TEI)
         return TEI.reshape(size,size,size,size).real/Nkpts
         
-    def locTEI_to_dmetTEI(self, loc_TEI, emb_orbs):
+    def loc_to_emb_TEI(self, loc_TEI, emb_orbs):
         '''Transform local TEI in R-space to embedding space''' 
         NRs, nlo, neo = emb_orbs.shape
         emb_orbs = emb_orbs.reshape([NRs*nlo,neo])
