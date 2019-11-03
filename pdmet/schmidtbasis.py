@@ -24,7 +24,7 @@ from pDMET.lib.build import libdmet
     
         
             
-def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None):
+def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
     '''
     Construct the RHF bath using the 1RDM for reference unit cell
     ref: 
@@ -42,23 +42,86 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None):
         emb_1RDM = supercell_1RDM[Nimp:,:]      
     else:
         imp_indices = np.asarray(imp_indices)
-        env_indices = np.matrix(1 - imp_indices)   
-        frag_env_mask = imp_indices.T.dot(env_indices) == 1
+        env_indices = np.matrix(1 - imp_indices) 
+        imp_indices = np.matrix(imp_indices) 
+        env_frag_mask = env_indices.T.dot(imp_indices) == 1
         Nimp = np.int32(imp_indices.sum())
         Nenv = Nlo - Nimp
-        emb_1RDM = supercell_1RDM[0][frag_env_block].reshape(Nimp, Nenv) 
-    
-    U, sigma, Vh = np.linalg.svd(emb_1RDM, full_matrices=False)
+        emb_1RDM = supercell_1RDM[0][env_frag_mask].reshape(Nenv, Nimp) 
+        
+    U, sigma, Vh = np.linalg.svd(emb_1RDM, full_matrices=True)
     distance_from_1 = np.abs(np.sqrt(np.abs(1-sigma**2)))
     idx = (distance_from_1).argsort()
+    distance_from_1 = distance_from_1[idx]
     sigma = sigma[idx]
+    U[:,:Nimp] = U[:,:Nimp][:,idx]
     V = Vh.T[:,idx]
     
-    # Assemble the embedding orbitals
-    emb_orbs = np.zeros([Nlo,2*Nimp])
-    emb_orbs[:Nimp,:Nimp] = V           # impurity orbitals
-    emb_orbs[Nimp:,Nimp:] = U           # bath orbitals
-    
-    assert(np.linalg.norm(np.dot(emb_orbs.T, emb_orbs) - np.identity(2*Nimp)) < 1e-12 ), "WARNING: The embedding orbitals is not orthogonal"
+    # Eliminate unentangled bath using a threshold:
+    Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()
 
-    return emb_orbs
+    # Assemble the embedding + core orbitals
+    Nemb = Nimp + Nbath
+    emb_orbs = np.zeros([Nlo, Nemb])
+    emb_orbs[:Nimp,:Nimp] = V           # impurity orbitals
+    emb_orbs[Nimp:,Nimp:] = U[:,:Nbath]           # bath orbitals
+    core_orbs = np.zeros([Nlo, Nlo - Nemb])
+    core_orbs[Nimp:,:] = U[:,Nbath:]
+    
+    emb_core_orbs = np.hstack([emb_orbs, core_orbs])
+    assert(np.linalg.norm(np.dot(emb_core_orbs.T, emb_core_orbs) - np.identity(Nlo)) < 1e-12 ), "WARNING: The embedding orbitals is not orthogonal"
+
+    return emb_orbs, core_orbs, Nbath
+    
+    
+def get_bath_using_gamma_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
+    '''
+    Construct the RHF bath using the 1RDM for reference unit cell
+    ref: 
+        J. Chem. Theory Comput. 2s016, 12, 2706−2719
+        
+    This should work for an KROHF wfs too, resulting in an ROHF bath  with the number of bath orbitals: num_impurity + 2S          
+    
+    Attributes:
+        supercell_1RDM_{0,L}        : the 1-RDM of the reference unit cell
+        
+    TODO: this was used to debug only, will be removed permanently
+    '''    
+    NR, Nimp, Nimp = supercell_1RDM.shape
+    Nlo = NR * Nimp
+    imp_indices = np.asarray(imp_indices)
+    env_indices = np.matrix(1 - imp_indices) 
+    env_frag_mask = env_indices.T.dot(env_indices) == 1
+    Nimp = np.int32(imp_indices.sum())
+    Nenv = Nlo - Nimp
+    emb_1RDM = supercell_1RDM[0][env_frag_mask].reshape(Nenv, Nenv) 
+        
+    sigma, U = np.linalg.eigh(emb_1RDM)
+    distance_from_1 = np.abs(sigma - 1)
+    idx = (distance_from_1).argsort()
+    distance_from_1 = distance_from_1[idx]
+    sigma = sigma[idx]
+    U = U[:,idx]
+    
+    # Eliminate unentangled bath using a threshold:
+    Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()
+
+    # Assemble the embedding orbitals
+    Nemb = Nimp + Nbath
+    emb_orbs = np.zeros([Nlo, Nemb])
+    emb_orbs[:Nimp,:Nimp] = np.eye(Nimp)           # impurity orbitals
+    emb_orbs[Nimp:,Nimp:] = U[:,:Nbath]           # bath orbitals
+    
+    # Assemble the core orbitals
+    eigvals_env = sigma[Nbath:]
+    idx = (-eigvals_env).argsort()
+    eigvals_env = eigvals_env[idx]
+    eigvecs_env = U[:,Nbath:][:,idx]
+    env_orbs = np.zeros([Nlo, Nlo - Nemb])
+    env_orbs[Nimp:,:] = eigvecs_env
+    env_occ = np.zeros(Nlo)
+    env_occ[Nemb:] = eigvals_env
+    
+    assert(np.linalg.norm(np.dot(emb_orbs.T, emb_orbs) - np.identity(Nemb)) < 1e-12 ), "WARNING: The embedding orbitals is not orthogonal"
+
+    return emb_orbs, env_orbs, Nbath

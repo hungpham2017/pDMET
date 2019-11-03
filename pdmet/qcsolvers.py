@@ -96,7 +96,7 @@ class QCsolvers:
             self.t1 = None
             self.t2 = None
          
-    def initialize(self, kmf_ecore, OEI, TEI, JK, DMguess, Norb, Nel, Nimp, chempot = 0.0):
+    def initialize(self, kmf_ecore, OEI, TEI, JK, DMguess, Norb, Nel, Nimp, chempot=0.0):
         self.kmf_ecore      = kmf_ecore       
         self.OEI            = OEI
         self.TEI            = TEI
@@ -105,7 +105,10 @@ class QCsolvers:
         self.Norb           = Norb
         self.Nel            = Nel
         self.Nimp           = Nimp
-        self.chempot        = chempot
+        chempot_array = np.zeros(Norb)
+        chempot_array[:Nimp] = chempot
+        self.chempot         = np.diag(chempot_array)
+        
 
 #####################################        
 ########## RHF/ROHF solver ##########
@@ -116,11 +119,8 @@ class QCsolvers:
         '''        
         
         Nimp = self.Nimp
-        FOCKcopy = self.FOCK.copy()
-        
-        if (self.chempot != 0.0):
-            for orb in range(Nimp):
-                FOCKcopy[orb, orb] -= self.chempot    
+        FOCKcopy = self.FOCK.copy() - self.chempot 
+ 
                 
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)
@@ -150,9 +150,9 @@ class QCsolvers:
             RDM1 = RDM1.sum(axis=0)
                 
         # Compute total energy        
-        e_cell = self.kmf_ecore + ImpurityEnergy   
+        e_cell = self.kmf_ecore + ImpurityEnergy  
         
-        return (e_cell, RDM1) 
+        return (e_cell, ERHF, RDM1) 
         
 ##################################
 ########## RCCSD solver ########## 
@@ -163,11 +163,7 @@ class QCsolvers:
         '''        
 
         Nimp = self.Nimp
-        FOCKcopy = self.FOCK.copy()
-        
-        if (self.chempot != 0.0):
-            for orb in range(Nimp):
-                FOCKcopy[orb, orb] -= self.chempot    
+        FOCKcopy = self.FOCK.copy() - self.chempot
                 
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)
@@ -195,7 +191,8 @@ class QCsolvers:
         else:
             t1_0 = self.t1
             t2_0 = self.t2
-        Ecorr, t1, t2 = self.cc.kernel(t1=t1_0, t2=t2_0)  
+        Ecorr, t1, t2 = self.cc.kernel(t1=t1_0, t2=t2_0)
+        ECCSD = Ecorr + self.mf.e_tot
         self.t1 = t1
         self.t2 = t2
         if self.cc.converged == False: print('           WARNING: The solver is not converged')        
@@ -218,9 +215,9 @@ class QCsolvers:
                        + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])                                                
 
         # Compute total energy    
-        e_cell = self.kmf_ecore + ImpurityEnergy               
+        e_cell = self.kmf_ecore + ImpurityEnergy 
 
-        return (e_cell, RDM1)            
+        return (e_cell, ECCSD, RDM1)            
 
 #################################           
 ########## DMRG solver ########## 
@@ -256,10 +253,7 @@ class QCsolvers:
         
         Norb = self.Norb
         Nimp = self.Nimp
-        FOCKcopy = self.FOCK.copy()    
-        if (self.chempot != 0.0):
-            for orb in range(Nimp):
-                FOCKcopy[orb, orb] -= self.chempot                                 
+        FOCKcopy = self.FOCK.copy() - self.chempot                                
                 
         # CheMPS2 calculation                
         Initializer = PyCheMPS2.PyInitialize()
@@ -364,7 +358,7 @@ class QCsolvers:
             RDM1 = lib.einsum('i,ijk->jk',self.state_percent, RDM1s) 
             e_cell = lib.einsum('i,i->',self.state_percent, e_cell)                     
             
-        return (e_cell, RDM1)     
+        return (e_cell, EDMRG0, RDM1)     
 
 ########## FCI solver (not spin-adapted) ##########          
     def FCI(self):
@@ -373,11 +367,7 @@ class QCsolvers:
         '''        
 
         Nimp = self.Nimp
-        FOCKcopy = self.FOCK.copy()
-        
-        if (self.chempot != 0.0):
-            for orb in range(Nimp):
-                FOCKcopy[orb, orb] -= self.chempot    
+        FOCKcopy = self.FOCK.copy() - self.chempot
                 
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)
@@ -404,7 +394,7 @@ class QCsolvers:
             ci0 = self.ci
         else:
             ci0 = None
-        e, fcivec = self.fs.kernel(ci0=ci0)         
+        EFCI, fcivec = self.fs.kernel(ci0=ci0)         
         self.ci = fcivec
         
         # Compute energy and RDM1      
@@ -455,7 +445,7 @@ class QCsolvers:
             e_cell = lib.einsum('i,i->',self.state_percent, e_cell)                
             self.SS = tot_SS/self.nroots  
                
-        return (e_cell, RDM1)
+        return (e_cell, EFCI, RDM1)
         
 ########## SHCI solver ##########          
     def SHCI(self):
@@ -464,11 +454,7 @@ class QCsolvers:
         '''        
 
         Nimp = self.Nimp
-        FOCKcopy = self.FOCK.copy()
-        
-        if (self.chempot != 0.0):
-            for orb in range(Nimp):
-                FOCKcopy[orb, orb] -= self.chempot    
+        FOCKcopy = self.FOCK.copy()  
                 
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)
@@ -507,7 +493,8 @@ class QCsolvers:
         else:
             ci0 = None
             mo_coeff = None
-        e_noPT, e_cas, fcivec, mo_coeff = mch.mc1step(mo_coeff=mo_coeff, ci0=ci0)[:4]        
+        e_noPT, e_cas, fcivec, mo_coeff = mch.mc1step(mo_coeff=mo_coeff, ci0=ci0)[:4] 
+        ESHCI = e_noPT #TODO: this is not correct, will be modified later
         self.ci = fcivec
         self.mo_coeff = mo_coeff
         
@@ -559,7 +546,7 @@ class QCsolvers:
             e_cell = lib.einsum('i,i->',self.state_percent, e_cell)                
             self.SS = tot_SS/self.nroots  
                
-        return (e_cell, RDM1)
+        return (e_cell, ESHCI, RDM1)
         
 #########################################        
 ########## CASSCF/CASCI solver ##########
@@ -570,11 +557,7 @@ class QCsolvers:
         '''        
 
         Nimp = self.Nimp
-        FOCKcopy = self.FOCK.copy()
-        
-        if (self.chempot != 0.0):
-            for orb in range(Nimp):
-                FOCKcopy[orb, orb] -= self.chempot    
+        FOCKcopy = self.FOCK.copy() - self.chempot
                 
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)
@@ -667,4 +650,4 @@ class QCsolvers:
         # Compute total energy    
         e_cell = self.kmf_ecore + ImpurityEnergy               
 
-        return (e_cell, RDM1)                
+        return (e_cell, e_tot, RDM1)                

@@ -31,12 +31,20 @@ from pDMET.lib.build import libdmet
     
     
 class Local:
-    def __init__(self, cell, kmf, w90, chkfile=None):
+    def __init__(self, cell, kmf, w90):
         '''
         TODO: need to be written
         Args:
             kmf        : a k-dependent mean-field wf
             w90        : a converged wannier90 object
+            
+        Indices
+            u, v    : k-space ao indices 
+            i, j    : k-space mo/local indices
+            m, n    : embedding indices
+            capital : R-space indices 
+            R, S, T : R-spacce lattice vector
+            
         '''        
         
         # Collect cell and kmf object information
@@ -132,29 +140,34 @@ class Local:
         return loc_1RDM_kpts, loc_1RDM_R0
         
     def get_emb_OEI(self, ao2eo):
-        '''Get embedding OEI'''
+        '''Get OEI projected into the embedding basis'''
         OEI = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.actOEI_kpts, ao2eo)
+        self.is_real(OEI)
+        return OEI.real
+        
+    def get_core_OEI(self, ao2core):
+        '''Get OEI projected into the core (unentangled) basis'''
+        OEI = lib.einsum('kum,kuv,kvn->mn', ao2core.conj(), self.actOEI_kpts, ao2core)
         self.is_real(OEI)
         return OEI.real
 
     def get_emb_FOCK(self, ao2eo):
-        '''Get embedding FOCK used to get core JK in embedding space without explicitly computing core JK in local space, need more efficient algorithm'''    
+        '''Get embedding FOCK used to get core JK in embedding basis without explicitly computing core JK in local basis, need more efficient algorithm'''    
         FOCK = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.fullfock_kpts, ao2eo)
         self.is_real(FOCK)  
         return FOCK.real
 
     def get_emb_JK(self, ao2eo):
-        '''Get embedding JK used to get core JK in embedding space without explicitly computing core JK in local space'''   
+        '''Get embedding JK used to get core JK in embedding basis without explicitly computing core JK in local basis'''   
         emb_JK = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.actJK_kpts, ao2eo)
         self.is_real(emb_JK)
         return emb_JK.real 
         
-    def get_emb_1RDM(self, loc_1RDM_kpts, emb_orbs):
-        '''Get 1-RDM rotated in the embedding space'''   
-        lo2eo = lib.einsum('kR, Rim -> kim', self.phase.conj().T, emb_orbs) 
-        emb_1RDM = lib.einsum('kum,kuv,kvn->mn', lo2eo.conj(), loc_1RDM_kpts, lo2eo)
-        self.is_real(emb_1RDM)
-        return emb_1RDM.real 
+    def get_core_JK(self, ao2core):
+        '''Get JK projected into the core (unentangled) basis'''   
+        core_JK = lib.einsum('kum,kuv,kvn->mn', ao2core.conj(), self.actJK_kpts, ao2core)
+        self.is_real(core_JK)
+        return core_JK.real 
 
     def get_emb_coreJK(self, ao2eo, emb_TEI, emb_1RDM):
         '''Get embedding core JK'''
@@ -220,6 +233,52 @@ class Local:
         TEI = TEI.reshape(neo,neo,neo,neo)
         return TEI  
         
+    def emb_to_loc_kpts(self, emb_matrix, emb_orbs):
+        '''Get k-space embedding 1e quantities in the k-space local basis
+        TODO: DEBUGGING THIS
+        
+        '''  
+        lo2eo = lib.einsum('Rk, Rim -> kim', self.phase.conj(), emb_orbs) 
+        loc_coreJK_kpts = lib.einsum('kim,mn,kjn->kij', lo2eo, emb_matrix, lo2eo.conj())
+        return loc_coreJK_kpts
+        
+    def loc_kpts_to_emb(self, RDM_deriv_kpts, emb_orbs):
+        '''Transform k-space 1-RDM gradient in local basis to embedding basis'''   
+        lo2eo = lib.einsum('Rk, Rim -> kim', self.phase.conj(), emb_orbs) 
+        emb_1RDM = lib.einsum('kim, kij, kjn -> mn', lo2eo.conj(), RDM_deriv_kpts, lo2eo)
+        self.is_real(emb_1RDM)
+        return emb_1RDM.real 
+        
+    def get_emb_mf_1RDM(self, emb_FOCK, Nelec_in_emb):
+        '''Get k-space 1-RDM  or derivative 1-RDM in the embedding basis''' 
+        npairs = Nelec_in_emb // 2
+        sigma, C = np.linalg.eigh(emb_FOCK)
+        C = C[:, sigma.argsort()]
+        emb_mf_1RDM = 2 * np.dot(C[:,:npairs], C[:,:npairs].T)
+        return emb_mf_1RDM
+        
+    def get_emb_guess_1RDM(self, emb_FOCK, Nimp, Nelec_in_emb, chempot):
+        '''Get guessing 1RDM for the embedding problem''' 
+        Nemb = emb_FOCK.shape[0]
+        npairs = Nelec_in_emb // 2
+        chempot_array = np.zeros(Nemb)
+        chempot_array[:Nimp] = chempot
+        emb_FOCK = emb_FOCK - np.diag(chempot_array)
+        sigma, C = np.linalg.eigh(emb_FOCK)
+        C = C[:, sigma.argsort()]
+        DMguess = 2 * np.dot(C[:,:npairs], C[:,:npairs].T)
+        return DMguess
+
+    def get_core_mf_1RDM(self, ao2core, Nelec_in_core):
+        '''Get k-space 1-RDM  or derivative 1-RDM in the embedding basis''' 
+        npairs = Nelec_in_core // 2
+        core_FOCK = lib.einsum('kum,kuv,kvn->mn', ao2core.conj(), self.fullfock_kpts, ao2core)
+        self.is_real(core_FOCK)  
+        sigma, C = np.linalg.eigh(core_FOCK)
+        C = C[:, sigma.argsort()]
+        core_mf_1RDM = 2 * np.dot(C[:,:npairs], C[:,:npairs].T)
+        return core_mf_1RDM 
+        
     def get_1RDM_Rs(self, imp_1RDM):
         '''Construct a R-space 1RDM from the reference cell 1RDM''' 
         NRs, nlo = imp_1RDM.shape[:2]
@@ -261,15 +320,18 @@ class Local:
     def get_ao2eo(self, emb_orbs):
         '''
         Get the transformation matrix from AO to EO
-            u, v    : k-space ao indices 
-            i, j    : k-space mo/local indices
-            m, n    : embedding indices
-            capital : R-space indices 
-            R, S, T : R-spacce lattice vector
         ''' 
         lo2eo = lib.einsum('Rk, Rim -> kim', self.phase.conj(), emb_orbs) 
         ao2eo = lib.einsum('kui, kim -> kum', self.ao2lo, lo2eo) 
-        return ao2eo   
+        return ao2eo  
+        
+    def get_ao2core(self, core_orbs):
+        '''
+        Get the transformation matrix from AO to the unentangled orbitals
+        ''' 
+        lo2core = lib.einsum('Rk, Rim -> kim', self.phase.conj(), core_orbs) 
+        ao2core = lib.einsum('kui, kim -> kum', self.ao2lo, lo2core) 
+        return ao2core 
 
     def ao_2_loc(self, M_kpts, ao2lo=None):
         '''
@@ -280,11 +342,6 @@ class Local:
         
     def k_to_R(self, M_kpts):  
         '''Transform AO or LO integral/1-RDM in k-space to R-space
-            u, v    : k-space ao indices 
-            i, j    : k-space mo/local indices
-            m, n    : embedding indices
-            capital : R-space indices 
-            R, S, T : R-spacce lattice vector
         ''' 
         NRs, Nkpts = self.phase.shape
         nao = M_kpts.shape[-1]
@@ -295,12 +352,6 @@ class Local:
         
     def k_to_R0(self, M_kpts):  
         '''Transform AO or LO integral/1-RDM in k-space to the reference unit cell
-            u, v    : k-space ao indices 
-            i, j    : k-space mo/local indices
-            m, n    : embedding indices
-            capital : R-space indices 
-            R, S, T : R-spacce lattice vector
-            
             M(k) -> M(0,R) with index Ruv
         ''' 
         NRs, Nkpts = self.phase.shape
@@ -311,16 +362,18 @@ class Local:
         
     def R_to_k(self, M_Rs):  
         '''Transform AO or LO integral/1-RDM in R-space to k-space 
-            u, v    : k-space ao indices 
-            i, j    : k-space mo/local indices
-            m, n    : embedding indices
-            capital : R-space indices 
-            R, S, T : R-spacce lattice vector
         ''' 
         NRs, Nkpts = self.phase.shape
         nao = M_Rs.shape[0]//NRs
         M_Rs = M_Rs.reshape(NRs,nao,NRs,nao)
         M_kpts = lib.einsum('Rk,RuSv,Sk->kuv', self.phase.conj(), M_Rs, self.phase)
+        return M_kpts
+        
+    def R0_to_k(self, M_R0):  
+        '''Transform AO or LO integral/1-RDM in R-space to k-space 
+        ''' 
+        NRs, nao = M_R0.shape[:2]
+        M_kpts = lib.einsum('Rk,Ruv,k->kuv', self.phase.conj(), M_R0, self.phase[0])
         return M_kpts
         
     def is_real(self, M, threshold=1.e-7):

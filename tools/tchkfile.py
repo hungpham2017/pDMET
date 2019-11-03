@@ -201,7 +201,7 @@ def save_pdmet(pdmet, chkfile):
     umat          = pdmet.umat     
     emb_orbs      = pdmet.emb_orbs
     mf_mo         = pdmet.qcsolver.mf.mo_coeff
-    actv1RDMloc   = pdmet.emb_1RDM 
+    actv1RDMloc   = pdmet.emb_corr_1RDM 
     
     if pdmet.solver in ['CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF']:
         mc_mo       = pdmet.qcsolver.mo
