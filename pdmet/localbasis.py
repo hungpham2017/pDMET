@@ -97,25 +97,14 @@ class Local:
         # Fock for the active part          
         self.fullfock_kpts = kmf.get_fock()            
         self.loc_actFOCK_kpts = self.ao_2_loc(self.fullfock_kpts, self.ao2lo)     
-        self.actJK_kpts = self.fullfock_kpts - self.actOEI_kpts     
-
+        self.actJK_kpts = self.fullfock_kpts - self.actOEI_kpts 
+        self.loc_actJK_kpts = self.ao_2_loc(self.actJK_kpts, self.ao2lo)      #DEBUG: used to debug, may be removed 
         
-    def make_loc_1RDM_kpts(self, umat, OEH_type='FOCK'):
+    def make_loc_1RDM_kpts(self, OEH_kpts):
         '''
-        Construct MOs/one-electron density matrix at each k-point in the local basis
-        with a certain k-independent correlation potential umat
+        Construct 1-RDM at each k-point in the local basis using certain mean-field Hamiltonian
         '''    
-
-        #Two choices for the one-electron Hamiltonian
-        if OEH_type == 'OEI':
-            OEH_kpts = self.loc_actOEI_kpts + umat
-        elif OEH_type == 'FOCK':
-            OEH_kpts = self.loc_actFOCK_kpts + umat  
-        elif OEH_type == 'proj':
-            OEH_kpts = umat                 # umat here is simply the new FOCK from the correlated DM
-        else:
-            raise Exception('the current one-electron Hamiltonian type is not supported')
-    
+  
         if self.spin == 0:
             eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
             idx_kpts = eigvals.argsort()
@@ -130,12 +119,12 @@ class Local:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
         
-    def make_loc_1RDM(self, umat, OEH_type='FOCK'):
+    def make_loc_1RDM(self, OEH_kpts):
         '''
         Construct the local 1-RDM at the reference unit cell
         '''    
     
-        loc_1RDM_kpts = self.make_loc_1RDM_kpts(umat, OEH_type)
+        loc_1RDM_kpts = self.make_loc_1RDM_kpts(OEH_kpts)
         loc_1RDM_R0 = self.k_to_R0(loc_1RDM_kpts)
         return loc_1RDM_kpts, loc_1RDM_R0
         
@@ -151,11 +140,12 @@ class Local:
         self.is_real(OEI)
         return OEI.real
 
-    def get_emb_FOCK(self, ao2eo):
-        '''Get embedding FOCK used to get core JK in embedding basis without explicitly computing core JK in local basis, need more efficient algorithm'''    
-        FOCK = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.fullfock_kpts, ao2eo)
-        self.is_real(FOCK)  
-        return FOCK.real
+    def get_emb_FOCK(self, emb_orbs, loc_OEH_kpts):
+        '''Get modified FOCK in embedding basis'''    
+        lo2eo = lib.einsum('Rk, Rim -> kim', self.phase.conj(), emb_orbs)
+        emb_fock_kpts = lib.einsum('kim,kij,kjn->mn', lo2eo.conj(), loc_OEH_kpts, lo2eo)
+        self.is_real(emb_fock_kpts)  
+        return emb_fock_kpts.real
 
     def get_emb_JK(self, ao2eo):
         '''Get embedding JK used to get core JK in embedding basis without explicitly computing core JK in local basis'''   
@@ -163,21 +153,24 @@ class Local:
         self.is_real(emb_JK)
         return emb_JK.real 
         
-    def get_core_JK(self, ao2core):
+    def get_core_JK(self, lo2core, loc_OEH_kpts):
         '''Get JK projected into the core (unentangled) basis'''   
-        core_JK = lib.einsum('kum,kuv,kvn->mn', ao2core.conj(), self.actJK_kpts, ao2core)
+        loc_JK_kpts = loc_OEH_kpts - self.loc_actOEI_kpts
+        core_JK = lib.einsum('kum,kuv,kvn->mn', lo2core.conj(), loc_JK_kpts, lo2core)
         self.is_real(core_JK)
         return core_JK.real 
 
-    def get_emb_coreJK(self, ao2eo, emb_TEI, emb_1RDM):
-        '''Get embedding core JK'''
-        ''' TODO: need to debug and make more efficient
+    def get_emb_coreJK(self, emb_JK, emb_TEI, emb_1RDM):
+        '''Get embedding core JK
+           Attributes:
+            emb_JK  : total JK projected into the embedding space
+            emb_TEI : TEI projected into the embedding space
+            emb_1RDM: 1RDM projected into the embedding space
         '''
-        emb_JK = self.get_emb_JK(ao2eo)
         J = lib.einsum('pqrs,rs->pq', emb_TEI, emb_1RDM)
         K = lib.einsum('prqs,rs->pq', emb_TEI, emb_1RDM) 
         emb_actJK = J - 0.5*K  
-        emb_coreJK = emb_JK - emb_actJK
+        emb_coreJK = emb_JK - emb_actJK     # Subtract JK from the active space (frag + bath) from the totak JK
         return emb_coreJK
         
     def get_emb_TEI(self, ao2eo):
@@ -269,10 +262,10 @@ class Local:
         DMguess = 2 * np.dot(C[:,:npairs], C[:,:npairs].T)
         return DMguess
 
-    def get_core_mf_1RDM(self, ao2core, Nelec_in_core):
+    def get_core_mf_1RDM(self, lo2core, Nelec_in_core, loc_OEH_kpts):
         '''Get k-space 1-RDM  or derivative 1-RDM in the embedding basis''' 
         npairs = Nelec_in_core // 2
-        core_FOCK = lib.einsum('kum,kuv,kvn->mn', ao2core.conj(), self.fullfock_kpts, ao2core)
+        core_FOCK = lib.einsum('kim,kij,kjn->mn', lo2core.conj(), loc_OEH_kpts, lo2core)
         self.is_real(core_FOCK)  
         sigma, C = np.linalg.eigh(core_FOCK)
         C = C[:, sigma.argsort()]
@@ -324,6 +317,13 @@ class Local:
         lo2eo = lib.einsum('Rk, Rim -> kim', self.phase.conj(), emb_orbs) 
         ao2eo = lib.einsum('kui, kim -> kum', self.ao2lo, lo2eo) 
         return ao2eo  
+        
+    def get_lo2core(self, core_orbs):
+        '''
+        Get the transformation matrix from AO to the unentangled orbitals
+        ''' 
+        lo2core = lib.einsum('Rk, Rim -> kim', self.phase.conj(), core_orbs) 
+        return lo2core 
         
     def get_ao2core(self, core_orbs):
         '''

@@ -246,9 +246,9 @@ class pDMET:
             ao2eo = self.local.get_ao2eo(self.emb_orbs)
             self.emb_OEI  = self.local.get_emb_OEI(ao2eo)
             self.emb_TEI  = self.local.get_emb_TEI(ao2eo)
-            self.emb_FOCK = self.local.get_emb_FOCK(ao2eo)
+            self.emb_FOCK = self.local.get_emb_FOCK(self.emb_orbs, self.loc_OEH_kpts)
             self.emb_mf_1RDM = self.local.get_emb_mf_1RDM(self.emb_FOCK, self.Nelec_in_emb)
-            self.emb_coreJK = self.local.get_emb_coreJK(ao2eo, self.emb_TEI, self.emb_mf_1RDM) 
+            self.emb_coreJK = self.local.get_emb_coreJK(self.emb_FOCK - self.emb_OEI, self.emb_TEI, self.emb_mf_1RDM) 
 
         emb_guess_1RDM = self.local.get_emb_guess_1RDM(self.emb_FOCK, self.Nimp, self.Nelec_in_emb, chempot)
         # Solving the embedding problem with high level wfs
@@ -293,21 +293,31 @@ class pDMET:
         if self._is_gamma == True:
             if self.is_new_bath == True:
                 ao2core = self.local.get_ao2core(self.core_orbs)
+                lo2core = self.local.get_lo2core(self.core_orbs)
                 core_OEI = self.local.get_core_OEI(ao2core)
-                core_JK = self.local.get_core_JK(ao2core)
+                core_JK = self.local.get_core_JK(lo2core, self.loc_OEH_kpts)
                 Nelec_in_core = self.Nelec_total - self.Nelec_in_emb
-                core_1RDM = self.local.get_core_mf_1RDM(ao2core, Nelec_in_core)
+                core_1RDM = self.local.get_core_mf_1RDM(lo2core, Nelec_in_core, self.loc_OEH_kpts)
                 core_energy = np.sum((core_OEI + 0.5 * core_JK)* core_1RDM)
                 core_energy -= np.sum((0.5*self.emb_coreJK) *self.emb_mf_1RDM)  # subtract the contribution already counted in the embedding Hamiltonian
                 self.core_energy = core_energy.real
 
-            
             self.e_tot = e_solver + self.core_energy + self.local.e_core
         else:
             self.e_tot = e_cell 
             
         return self.nelec_per_cell
 
+
+    def get_loc_OEH_kpts(self, umat, OEH_type='FOCK'):
+        '''Get modified mean-field Hamiltinian: h_tilder = h + u'''
+        if OEH_type == 'FOCK':
+            OEH_kpts = self.local.loc_actFOCK_kpts + umat  
+        else:
+            raise Exception('the current one-electron Hamiltonian type is not supported')
+
+        return OEH_kpts
+        
     def bath_contruction(self, loc_1RDM_R0, impCluster):
         '''Get the bath orbitals'''
         emb_orbs, core_orbs, Nbath = get_bath_using_RHF_1RDM(loc_1RDM_R0, impCluster)
@@ -330,7 +340,8 @@ class pDMET:
         
         tprint.print_msg("--------------------------------------------------------------------")   
         
-        self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(self.umat, 'FOCK')       
+        self.loc_OEH_kpts = self.get_loc_OEH_kpts(0.0)
+        self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(self.loc_OEH_kpts)       
         self.emb_orbs, self.core_orbs, self.Nbath, self.Nelec_in_emb = self.bath_contruction(self.loc_1RDM_R0, self.impCluster)
         
         solver = self.solver
@@ -368,10 +379,14 @@ class pDMET:
 
         self._cycle = 1       
  
-        # if projected DMET algorithm is used, loc_1RDM_kpts and loc_1RDM_R0 are got from the SCF
-        if is_projected == False:
-            self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(umat, self.OEH_type)
-        
+
+        if is_projected == True:
+            self.loc_OEH_kpts = umat
+            self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(self.loc_OEH_kpts)
+        else:
+            self.loc_OEH_kpts = self.get_loc_OEH_kpts(umat)
+            self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(loc_OEH_kpts)
+            
         self.emb_orbs, self.core_orbs, self.Nbath, self.Nelec_in_emb = self.bath_contruction(self.loc_1RDM_R0, self.impCluster)
         
         # Optimize the chemical potential
