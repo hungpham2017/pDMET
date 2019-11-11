@@ -39,16 +39,17 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
     Nlo = NR * Nimp
     if imp_indices is None:
         supercell_1RDM = supercell_1RDM.reshape(Nlo, Nimp)
-        emb_1RDM = supercell_1RDM[Nimp:,:]      
+        emb_1RDM = supercell_1RDM[Nimp:,:]  
+        imp_indices = np.zeros([Nlo])
+        imp_indices[:Nimp] = 1        
     else:
         imp_indices = np.asarray(imp_indices)
         env_indices = np.matrix(1 - imp_indices) 
-        imp_indices = np.matrix(imp_indices) 
-        env_frag_mask = env_indices.T.dot(imp_indices) == 1
+        env_frag_mask = env_indices.T.dot(np.matrix(imp_indices) ) == 1
         Nimp = np.int32(imp_indices.sum())
         Nenv = Nlo - Nimp
         emb_1RDM = supercell_1RDM[0][env_frag_mask].reshape(Nenv, Nimp) 
-        
+       
     U, sigma, Vh = np.linalg.svd(emb_1RDM, full_matrices=True)
     distance_from_1 = np.abs(np.sqrt(np.abs(1-sigma**2)))
     idx = (distance_from_1).argsort()
@@ -59,14 +60,15 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
     
     # Eliminate unentangled bath using a threshold:
     Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()
+    if Nbath == 0: Nbath = Nimp         # Avoid zero bath situation
 
     # Assemble the embedding + core orbitals
     Nemb = Nimp + Nbath
     emb_orbs = np.zeros([Nlo, Nemb])
-    emb_orbs[:Nimp,:Nimp] = V           # impurity orbitals
-    emb_orbs[Nimp:,Nimp:] = U[:,:Nbath]           # bath orbitals
+    emb_orbs[imp_indices==1,:Nimp] = V                      # impurity orbitals
+    emb_orbs[imp_indices==0,Nimp:] = U[:,:Nbath]            # bath orbitals
     core_orbs = np.zeros([Nlo, Nlo - Nemb])
-    core_orbs[Nimp:,:] = U[:,Nbath:]
+    core_orbs[imp_indices==0,:] = U[:,Nbath:]
     
     emb_core_orbs = np.hstack([emb_orbs, core_orbs])
     assert(np.linalg.norm(np.dot(emb_core_orbs.T, emb_core_orbs) - np.identity(Nlo)) < 1e-12 ), "WARNING: The embedding orbitals is not orthogonal"
@@ -87,6 +89,7 @@ def get_bath_using_gamma_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.
         
     TODO: this was used to debug only, will be removed permanently
     '''    
+    
     NR, Nimp, Nimp = supercell_1RDM.shape
     Nlo = NR * Nimp
     imp_indices = np.asarray(imp_indices)
@@ -106,11 +109,22 @@ def get_bath_using_gamma_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.
     # Eliminate unentangled bath using a threshold:
     Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()
 
+    # For the impurity:
+    frag_frag_mask = np.matrix(imp_indices).T.dot(np.matrix(imp_indices)) == 1
+    imp_1RDM = supercell_1RDM[0][frag_frag_mask].reshape(Nimp, Nimp) 
+    sigma1, U1 = np.linalg.eigh(imp_1RDM)
+    distance_from_1 = np.abs(sigma1 - 1)
+    idx = (distance_from_1).argsort()
+    distance_from_1 = distance_from_1[idx]
+    sigma1 = sigma1[idx]
+    U1 = U1[:,idx]
+    
     # Assemble the embedding orbitals
     Nemb = Nimp + Nbath
     emb_orbs = np.zeros([Nlo, Nemb])
-    emb_orbs[:Nimp,:Nimp] = np.eye(Nimp)           # impurity orbitals
-    emb_orbs[Nimp:,Nimp:] = U[:,:Nbath]           # bath orbitals
+    emb_orbs[imp_indices==1,:Nimp] = U1           # impurity orbitals
+    emb_orbs[imp_indices==0,Nimp:] = U[:,:Nbath]           # bath orbitals
+    
     
     # Assemble the core orbitals
     eigvals_env = sigma[Nbath:]
@@ -118,7 +132,7 @@ def get_bath_using_gamma_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.
     eigvals_env = eigvals_env[idx]
     eigvecs_env = U[:,Nbath:][:,idx]
     env_orbs = np.zeros([Nlo, Nlo - Nemb])
-    env_orbs[Nimp:,:] = eigvecs_env
+    env_orbs[imp_indices==0,:] = eigvecs_env
     env_occ = np.zeros(Nlo)
     env_occ[Nemb:] = eigvals_env
     

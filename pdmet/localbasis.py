@@ -169,7 +169,7 @@ class Local:
         '''
         J = lib.einsum('pqrs,rs->pq', emb_TEI, emb_1RDM)
         K = lib.einsum('prqs,rs->pq', emb_TEI, emb_1RDM) 
-        emb_actJK = J - 0.5*K  
+        emb_actJK = J - 0.5*K
         emb_coreJK = emb_JK - emb_actJK     # Subtract JK from the active space (frag + bath) from the totak JK
         return emb_coreJK
         
@@ -247,7 +247,7 @@ class Local:
         npairs = Nelec_in_emb // 2
         sigma, C = np.linalg.eigh(emb_FOCK)
         C = C[:, sigma.argsort()]
-        emb_mf_1RDM = 2 * np.dot(C[:,:npairs], C[:,:npairs].T)
+        emb_mf_1RDM = 2 * np.dot(C[:,:npairs], C[:,:npairs].T.conj())
         return emb_mf_1RDM
         
     def get_emb_guess_1RDM(self, emb_FOCK, Nimp, Nelec_in_emb, chempot):
@@ -259,7 +259,7 @@ class Local:
         emb_FOCK = emb_FOCK - np.diag(chempot_array)
         sigma, C = np.linalg.eigh(emb_FOCK)
         C = C[:, sigma.argsort()]
-        DMguess = 2 * np.dot(C[:,:npairs], C[:,:npairs].T)
+        DMguess = 2 * np.dot(C[:,:npairs], C[:,:npairs].T.conj())
         return DMguess
 
     def get_core_mf_1RDM(self, lo2core, Nelec_in_core, loc_OEH_kpts):
@@ -267,17 +267,17 @@ class Local:
         npairs = Nelec_in_core // 2
         core_FOCK = lib.einsum('kim,kij,kjn->mn', lo2core.conj(), loc_OEH_kpts, lo2core)
         self.is_real(core_FOCK)  
-        sigma, C = np.linalg.eigh(core_FOCK)
+        sigma, C = np.linalg.eigh(core_FOCK.real)
         C = C[:, sigma.argsort()]
-        core_mf_1RDM = 2 * np.dot(C[:,:npairs], C[:,:npairs].T)
+        core_mf_1RDM = 2 * np.dot(C[:,:npairs], C[:,:npairs].T.conj())
         return core_mf_1RDM 
         
-    def get_1RDM_Rs(self, imp_1RDM):
+    def get_1RDM_Rs(self, loc_1RDM_R0):
         '''Construct a R-space 1RDM from the reference cell 1RDM''' 
-        NRs, nlo = imp_1RDM.shape[:2]
-        imp_1RDM_kpts = lib.einsum('Rij,Rk->kij', imp_1RDM, self.phase)*np.sqrt(self.Nkpts)
-        RDM1_Rs = self.k_to_R(imp_1RDM_kpts)
-        return RDM1_Rs
+        NRs, nlo = loc_1RDM_R0.shape[:2]
+        loc_1RDM_kpts = lib.einsum('Rk,Rij,k->kij', self.phase.conj(), loc_1RDM_R0, self.phase[0])*self.Nkpts
+        loc_1RDM_Rs = self.k_to_R(loc_1RDM_kpts)
+        return loc_1RDM_Rs
         
     def get_phase(self, cell=None, kpts=None, kmesh=None):
         '''
@@ -339,6 +339,13 @@ class Local:
         '''      
         if ao2lo is None: ao2lo = self.ao2lo
         return lib.einsum('kui,kuv,kvj->kij', ao2lo.conj(), M_kpts, ao2lo) 
+        
+    def loc_2_ao(self, M_kpts, ao2lo=None):
+        '''
+        Transform an k-space local integral to ao orbitals
+        '''      
+        if ao2lo is None: ao2lo = self.ao2lo
+        return lib.einsum('kui,kij,kvj->kuv', ao2lo, M_kpts, ao2lo.conj()) 
         
     def k_to_R(self, M_kpts):  
         '''Transform AO or LO integral/1-RDM in k-space to R-space
