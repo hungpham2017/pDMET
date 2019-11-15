@@ -76,7 +76,7 @@ class pDMET:
         self.SC_CFtype          = "F" # Options: ['F','diagF', 'FB','diagFB']
         self.alt_CF             = False         
         self.damping            = 1.0 # 1.0 means no damping
-        self.DIIS               = False          
+        self.DIIS               = True          
         self.DIIS_m             = 1   
         self.DIIS_n             = 10   
         
@@ -115,6 +115,12 @@ class pDMET:
         self.kmesh = self.w90.mp_grid_loc
         if self.kmf_chkfile is not None:
             self.kmf = tchkfile.load_kmf(self.cell, self.kmf, self.kmesh, self.kmf_chkfile, max_memory=self.max_memory)
+            if self.kmf.with_df._cderi == None:
+                if tunix.check_exist('gdf.h5'):
+                    self.kmf.with_df._cderi = 'gdf.h5'
+                else:
+                    print("WARNING: Provide density fitting file in initiating kmf object or make sure the saved kmf object is using the same density fitting")
+                
             
         if self.kmf.exxdiv is not None: 
             raise Exception('The pDMET has not been developed for the RHF calculation with exxdiv is not None')
@@ -147,6 +153,7 @@ class pDMET:
         self.Nelec_per_cell = self.local.nelec_per_cell
         self.numPairs = self.Nelec_per_cell // 2 
         
+
         if self.impCluster is not None:
             assert np.prod(self.kmesh) == 1, "impCluster is used only for a Gamma-point sampling calculation"
             assert np.size(self.impCluster) == self.Norbs, "Impurity indices array needs to have the same size with the total MLWFs"
@@ -192,13 +199,14 @@ class pDMET:
             #TODO: debugging the alternative cost function, this will be updated
             pass
         else:
-            self.CF = self.glob_cost_func            
-            self.CF_grad = self.glob_cost_func_grad  
+            self.CF = self.cost_func            
+            self.CF_grad = self.cost_func_grad  
             
-        # Initializing Damping procedure and DIIS object          
+        # Initializing damping procedure and DIIS object          
         if self.DIIS == True:
             assert self.DIIS_m >= 1        
-            self._diis = diis.DIIS(self.DIIS_m, self.DIIS_n, self.Nkpts)   
+            self._diis = diis.DIIS(self.DIIS_m, self.DIIS_n)   
+            
         if self.damping != 1.0:
             assert (0 <= self.damping <= 1.0)          
 
@@ -219,7 +227,7 @@ class pDMET:
         
         tprint.print_msg("Initializing ... DONE")       
                 
-    def kernel(self, chempot=0.0, check=False):
+    def kernel(self, loc_OEH_kpts, chempot=0.0):
         '''
         This is the main kernel for DMET calculation.
         It is solving the embedding problem, then returning the total number of electrons per unit cell 
@@ -233,7 +241,6 @@ class pDMET:
             nelec                           : the number of electrons for the unit cell    
             emb_corr_1RDM                   : correlated 1RDM for the unit cell                
         '''            
-        np.set_printoptions(8, suppress=True)
               
         # Transform the 1e/2e integrals and the JK core constribution to schmidt basis
         if self.is_new_bath == True:
@@ -243,9 +250,10 @@ class pDMET:
                 self.emb_TEI  = self.local.get_emb_TEI(ao2eo)
             else:
                 self.emb_TEI  = self.local.get_TEI(ao2eo)
-            self.emb_FOCK = self.local.get_emb_FOCK(self.emb_orbs, self.loc_OEH_kpts)
+            self.emb_FOCK = self.local.get_emb_FOCK(self.emb_orbs, loc_OEH_kpts)
             self.emb_mf_1RDM = self.local.get_emb_mf_1RDM(self.emb_FOCK, self.Nelec_in_emb)
-            self.emb_coreJK = self.local.get_emb_coreJK(self.emb_FOCK - self.emb_OEI, self.emb_TEI, self.emb_mf_1RDM) 
+            emb_JK = self.local.get_emb_JK(self.loc_1RDM_kpts, ao2eo)
+            self.emb_coreJK = self.local.get_emb_coreJK(emb_JK, self.emb_TEI, self.emb_mf_1RDM)         
 
         emb_guess_1RDM = self.local.get_emb_guess_1RDM(self.emb_FOCK, self.Nimp, self.Nelec_in_emb, chempot)
         # Solving the embedding problem with high level wfs
@@ -270,13 +278,9 @@ class pDMET:
         elif self.solver == 'SHCI':
             e_cell, e_solver, RDM1 = self.qcsolver.SHCI()              
         
-        if check == False:       # pDMET attributes are not updated when check_exact function is called
-            self.emb_corr_1RDM    = RDM1
-            # DEBUG the global cost function
-            self.loc_corr_1RDM_Rs = self.local.get_1RDM_Rs(self.loc_corr_1RDM_R0)
-            self.loc_corr_1RDM_Rs = (self.loc_corr_1RDM_Rs.T + self.loc_corr_1RDM_Rs) * 0.5
+        self.emb_corr_1RDM    = RDM1
         self.loc_corr_1RDM_R0 = lib.einsum('Rim,mn,jn->Rij', self.emb_orbs, RDM1, self.emb_orbs[0].conj())
-            
+
         if not np.isclose(self._SS, self.qcsolver.SS): 
             tprint.print_msg("           WARNING: Spin contamination. Computed <S^2>: %10.8f, Target: %10.8f" % (self.qcsolver.SS, self._SS)) 
             
@@ -288,14 +292,13 @@ class pDMET:
                     ao2core = self.local.get_ao2core(self.core_orbs)
                     lo2core = self.local.get_lo2core(self.core_orbs)
                     core_OEI = self.local.get_core_OEI(ao2core)
-                    core_JK = self.local.get_core_JK(lo2core, self.loc_OEH_kpts)
                     Nelec_in_core = self.Nelec_total - self.Nelec_in_emb
-                    core_1RDM = self.local.get_core_mf_1RDM(lo2core, Nelec_in_core, self.loc_OEH_kpts)
+                    core_1RDM = self.local.get_core_mf_1RDM(lo2core, Nelec_in_core, loc_OEH_kpts)
+                    loc_core_1RDM = lib.einsum('kim,mn,kjn->kij', lo2core, core_1RDM, lo2core.conj())
+                    core_JK = self.local.get_core_JK(ao2core, loc_core_1RDM)
                     core_energy = np.sum((core_OEI + 0.5 * core_JK)* core_1RDM)
-                    core_energy -= np.sum((0.5*self.emb_coreJK) *self.emb_mf_1RDM)  # subtract the contribution already counted in the embedding Hamiltonian
                     self.core_energy = core_energy.real
-                    self.loc_core_1RDM = lib.einsum('kim,mn,kjn->ij', lo2core, core_1RDM, lo2core.conj())
-                    self.loc_core_1RDM = self.loc_core_1RDM.real.reshape(1, self.Norbs, self.Norbs)
+                    self.loc_core_1RDM = loc_core_1RDM.real.reshape(1, self.Norbs, self.Norbs)    
                 else:
                     self.core_energy = 0.0
                     self.loc_core_1RDM = 0.0
@@ -308,7 +311,6 @@ class pDMET:
             self.nelec_per_cell = np.trace(RDM1[:self.Nimp,:self.Nimp])
             self.e_tot = e_cell   
                 
-            
         return self.nelec_per_cell
 
 
@@ -343,13 +345,13 @@ class pDMET:
         
         tprint.print_msg("--------------------------------------------------------------------")   
         
-        self.loc_OEH_kpts = self.get_loc_OEH_kpts(0.0)
-        self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(self.loc_OEH_kpts)       
+        loc_OEH_kpts = self.get_loc_OEH_kpts(0.0)
+        self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(loc_OEH_kpts)        
         self.emb_orbs, self.core_orbs, self.Nbath, self.Nelec_in_emb = self.bath_contruction(self.loc_1RDM_R0, self.impCluster)
         
         solver = self.solver
         self.solver = 'HF'
-        nelec_cell = self.kernel(chempot=0.0, check=True)
+        nelec_cell = self.kernel(loc_OEH_kpts, chempot=0.0)
         self.solver = solver        
         
         diff = abs(self.e_tot - self.kmf.e_tot)
@@ -361,9 +363,10 @@ class pDMET:
         else:
              raise Exception('WARNING: HF-in-HF embedding is not exact')                    
         
-    def one_shot(self, umat=0, is_projected=False):
+    def one_shot(self, umat=0.0, loc_OEH_kpts=None):
         '''
         Do one-shot DMET, only the chemical potential is optimized
+        this function takes umat or loc_1RDM_R0 (p-DMET algorthm)
         '''
 
         tprint.print_msg("-- One-shot pDMET ... starting at %s" % (tunix.current_time()))    
@@ -380,20 +383,20 @@ class pDMET:
             if self.qcsolver.cas is not None: tprint.print_msg("   Active space     :", self.qcsolver.cas)
             if self.qcsolver.cas is not None: tprint.print_msg("   Active space MOs :", self.qcsolver.molist)
             
-        self._cycle = 1       
-        
-        if is_projected == True:
-            self.loc_OEH_kpts = umat
+        self._cycle = 1 
+        if loc_OEH_kpts is None:
+            loc_OEH_kpts = self.get_loc_OEH_kpts(umat)
+            self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(loc_OEH_kpts)
         else:
-            self.loc_OEH_kpts = self.get_loc_OEH_kpts(umat)
-            
-        self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(self.loc_OEH_kpts)
+            self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(loc_OEH_kpts)        
+                    
         self.emb_orbs, self.core_orbs, self.Nbath, self.Nelec_in_emb = self.bath_contruction(self.loc_1RDM_R0, self.impCluster)
-        
+
         # Optimize the chemical potential
         if self._is_gamma == True:
-            nelec_per_cell_from_embedding = self.kernel(chempot=0.0)
+            nelec_per_cell_from_embedding = self.kernel(loc_OEH_kpts, chempot=0.0)
         else:
+            self.loc_OEH_kpts = loc_OEH_kpts
             self.chempot = optimize.newton(self.nelec_cost_func, self.chempot)
             tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_per_cell))
             
@@ -416,9 +419,6 @@ class pDMET:
             tprint.print_msg("  Damping factor   :", self.damping)                
         if self.DIIS:
             tprint.print_msg("  DIIS start at %dth cycle and using %d previous umats" % (self.DIIS_m, self.DIIS_n))            
-                 
-        weight = 1           
-
         #------------------------------------#
         #---- SELF-CONSISTENT PROCEDURE ----#      
         #------------------------------------#    
@@ -437,31 +437,32 @@ class pDMET:
 
             # Optimize uvec to minimize the cost function
             if self.SC_method in ['BFGS', 'L-BFGS-B', 'CG', 'Newton-CG']:
-                result = optimize.minimize(self.CF, self.uvec, method = self.SC_method, jac = self.CF_grad, options = {'disp': False, 'gtol': 1e-12})
+                result = optimize.minimize(self.CF, self.uvec, method=self.SC_method, jac=None, options={'disp': False, 'gtol': 1e-12})
                 # result = optimize.minimize(self.CF, self.uvec, method = self.SC_method , options = {'disp': False, 'gtol': 1e-12})                
             else:
                 tprint.print_msg("     WARNING:", self.SC_method, " is not supported")
                 
             if result.success == False:         
                 tprint.print_msg("     WARNING: Correlation potential is not converged")    
-                
-            self.uvec = result.x
-            self.umat = self.uvec2umat(self.uvec)   
+                  
+            uvec = result.x
+            self.umat = self.uvec2umat(uvec)   
             
-            self.loc_OEH_kpts = self.get_loc_OEH_kpts(self.umat)
-            rdm1_kpts, rdm1_R0 = self.local.make_loc_1RDM(self.loc_OEH_kpts)   
+            loc_OEH_kpts = self.get_loc_OEH_kpts(self.umat)
+            rdm1_kpts, rdm1_R0 = self.local.make_loc_1RDM(loc_OEH_kpts) 
             
-            self.umat = self.umat - np.eye(self.umat.shape[0])*np.average(np.diag(self.umat))       #TODO: check this carefully      
+            # Remove arbitrary chemical potential shifts
+            self.umat = self.umat - np.eye(self.umat.shape[0])*np.average(np.diag(self.umat))
 
             if self.verbose > 0:
-                tprint.print_msg("   + Correlation potential vector    : ", self.uvec)
+                tprint.print_msg("   + Correlation potential vector    : ", uvec)
                     
-            umat_diff = self.umat - umat_old          
-            rdm_diff  = rdm1_R0 - rdm1_R0_old             
+            umat_diff = umat_old - self.umat       
+            rdm_diff  = rdm1_R0_old - rdm1_R0           
             norm_u    = np.linalg.norm(umat_diff)             
             norm_rdm  = np.linalg.norm(rdm_diff) 
             
-            tprint.print_msg("   + Cost function             : %20.15f" % (result.fun)) #%12.8
+            tprint.print_msg("   + Cost function             : %20.15f" % (result.fun))
             tprint.print_msg("   + 2-norm of umat difference : %20.15f" % (norm_u)) 
             tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
             
@@ -471,17 +472,18 @@ class pDMET:
                 sys.path.append('/panfs/roc/groups/6/gagliard/phamx494/CPPlib/pyWannier90')
                 import pywannier90
                 band = self.get_bands()
-                print(band.mo_energy_kpts)
-                #pywannier90.save_kmf(band, self.chkfile + '_band_cyc' + str(cycle + 1))
+                pywannier90.save_kmf(band, str(self.solver) + '_Band_cyc_' + str(cycle + 1))
                 
             # Check convergence of 1-RDM            
             if (norm_u <= self.SC_threshold): break
-
+            
+            if self.DIIS == True:  
+                global_corr_1RDM = self._diis.update(cycle, self.umat, rdm_diff)  
+                
             if self.damping != 1.0:                
                 self.umat = (1.0 - self.damping)*umat_old + self.damping*self.umat        
-                
+
             self.uvec =  self.umat2uvec(self.umat)    
-            
             tprint.print_msg()            
             
         tprint.print_msg("- SELF-CONSISTENT DMET CALCULATION ... DONE -")
@@ -494,7 +496,7 @@ class pDMET:
         '''    
            
         tprint.print_msg("--------------------------------------------------------------------")
-        tprint.print_msg("- SELF-CONSISTENT p-DMET CALCULATION ... STARTING -")
+        tprint.print_msg("- p-DMET CALCULATION ... STARTING -")
         tprint.print_msg("  Convergence criteria")   
         tprint.print_msg("    Threshold :", self.SC_threshold)    
         tprint.print_msg("  Fitting 1-RDM of :", self.SC_CFtype)         
@@ -507,61 +509,54 @@ class pDMET:
         #------------------------------------#
         #---- SELF-CONSISTENT PROCEDURE ----#      
         #------------------------------------#    
-        loc_OEH_kpts = self.get_loc_OEH_kpts(0.0)       # Original Fock opterator
-
-
+        loc_OEH_kpts = self.get_loc_OEH_kpts(0.0)
+        loc_1RDM_kpts, loc_1RDM_R0 = self.local.make_loc_1RDM(loc_OEH_kpts)
+        global_corr_1RDM = self.local.k_to_R(loc_1RDM_kpts)
         for cycle in range(self.SC_maxcycle):
             tprint.print_msg("- CYCLE %d:" % (cycle + 1))  
-            
-            # DEBUG 
-            np.set_printoptions(6, suppress=True)
-
-
-            # Do one-shot with each uvec                  
-            self.one_shot(loc_OEH_kpts, is_projected=True) 
-            rdm1_R0_old = self.local.make_loc_1RDM(loc_OEH_kpts)[1]
-            
-            if self._is_gamma == True:
-                rdm1_R0_old += self.loc_core_1RDM
-            else:
+            global_corr_1RDM_old = global_corr_1RDM
+            self.one_shot(loc_OEH_kpts=loc_OEH_kpts) 
+           
+            if self._is_gamma == False:
                 tprint.print_msg("   + Chemical potential        : %12.8f" % (self.chempot))
             
             # Construct new global 1RDM in k-space
-            RDM1_Rs = self.local.get_1RDM_Rs(self.loc_corr_1RDM_R0)
-            RDM1_Rs = 0.5*(RDM1_Rs.T + RDM1_Rs)          # make sure the global DM is hermitian
-            eigenvals, eigenvecs = np.linalg.eigh(RDM1_Rs)
+            global_corr_1RDM = self.local.get_1RDM_Rs(self.loc_corr_1RDM_R0)
+            global_corr_1RDM = 0.5*(global_corr_1RDM.T.conj() + global_corr_1RDM)   
+            eigenvals, eigenvecs = np.linalg.eigh(global_corr_1RDM)
             idx = (-eigenvals).argsort()
             eigenvals = eigenvals[idx]
             eigenvecs = eigenvecs[:,idx]
             num_pairs = self.Nelec_total//2
-            mf_RDM1_Rs = 2 * eigenvecs[:,:num_pairs].dot(eigenvecs[:,:num_pairs].T)
-            if self._is_gamma == True:
-                loc_1RDM_R0 = mf_RDM1_Rs.reshape(1, self.Norbs, self.Norbs) + self.loc_core_1RDM
-            else:
-                loc_1RDM_R0 = mf_RDM1_Rs[:,:self.Nimp].reshape(self.Nkpts,self.Nimp,self.Nimp)
-                
-            rdm_diff  = rdm1_R0_old - loc_1RDM_R0         
-            norm_rdm  = np.linalg.norm(rdm_diff) 
-            tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
-            
-            # Construct new FOCK:
-            loc_1RDM_kpts = self.local.R0_to_k(loc_1RDM_R0)
-            ao_1RDM_kpts = self.local.loc_2_ao(loc_1RDM_kpts)
-            new_ao_OEH_kpts = self.kmf.get_fock(dm=ao_1RDM_kpts)
-            new_loc_OEH_kpts = self.local.ao_2_loc(new_ao_OEH_kpts)
+            global_mf_1RDM = 2 * eigenvecs[:,:num_pairs].dot(eigenvecs[:,:num_pairs].T)
+            global_corr_1RDM_residual  = global_corr_1RDM_old - global_corr_1RDM         
+            norm_1RDM  = np.linalg.norm(global_corr_1RDM_residual) 
+            tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_1RDM))  
             
             # Check convergence of 1-RDM            
-            if norm_rdm <= self.SC_threshold: 
+            if norm_1RDM <= self.SC_threshold: 
                 break
+ 
+            if self.DIIS == True:  
+                global_corr_1RDM = self._diis.update(cycle, global_corr_1RDM, global_corr_1RDM_residual)   
                 
-            loc_OEH_kpts = self.damping*new_loc_OEH_kpts + (1-self.damping)*loc_OEH_kpts  
-         
-            # if self.DIIS == True:  
-                # rdm1_R0 = self.loc_1RDM_R0.
-                # rdm1_R0 = self._diis.update(cycle, rdm1_R0, rdm_diff)            
+            if self.damping != 1.0:
+                global_corr_1RDM = self.damping*global_corr_1RDM + (1-self.damping)*global_corr_1RDM_old
+                
+            # Contruct new Fock
+            if self._is_gamma == True:
+                loc_1RDM_R0 = global_mf_1RDM.reshape(1, self.Norbs, self.Norbs) + self.loc_core_1RDM
+            else:
+                loc_1RDM_R0 = global_mf_1RDM[:,:self.Nimp].reshape(self.Nkpts, self.Nimp, self.Nimp)
+                
+            loc_1RDM_kpts = self.local.R0_to_k(loc_1RDM_R0)
+            ao_1RDM_kpts = self.local.loc_2_ao(loc_1RDM_kpts)
+            ao_jk = self.kmf.get_veff(self.cell, ao_1RDM_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
+            ao_fock = self.kmf.get_hcore() + ao_jk
+            loc_OEH_kpts = self.local.ao_2_loc(ao_fock)
             tprint.print_msg()            
             
-        tprint.print_msg("- SELF-CONSISTENT p-DMET CALCULATION ... DONE -")
+        tprint.print_msg("- p-DMET CALCULATION ... DONE -")
         tprint.print_msg("--------------------------------------------------------------------")  
         
     def nelec_cost_func(self, chempot):
@@ -569,12 +564,11 @@ class pDMET:
         The different in the correct number of electrons (provided) and the calculated one 
         '''
         
-        nelec_per_cell_from_embedding = self.kernel(chempot)
+        nelec_per_cell_from_embedding = self.kernel(self.loc_OEH_kpts, chempot)
         self.is_new_bath = False
         print ("     Cycle %2d. Chem potential: %12.8f | Elec/cell = %12.8f | <S^2> = %12.8f" % \
-                                                        (self._cycle, chempot, nelec_per_cell_from_embedding, self.qcsolver.SS))                                                                                
+                                                        (self._cycle, chempot, nelec_per_cell_from_embedding, self.qcsolver.SS))                                                                               
         self._cycle += 1
-        #if self.chkfile is not None: tchkfile.save_pdmet(self, self.chkfile)
         return nelec_per_cell_from_embedding - self.Nelec_per_cell
 
     def cost_func(self, uvec):
@@ -585,7 +579,6 @@ class pDMET:
         '''
         rdm_diff = self.get_rdm_diff(uvec)
         cost = np.power(rdm_diff, 2).sum()  
-        print("COST", cost)
         return cost
         
 
@@ -901,7 +894,7 @@ class pDMET:
             CF = self.glob_cost_func
             CF_grad = self.glob_cost_func_grad
        
-        result = optimize.minimize(CF, self.uvec, method=method, jac=CF_grad, options={'disp': False, 'gtol': 1e-12})
+        result = optimize.minimize(CF, self.uvec, method=method, jac=None, options={'disp': False, 'gtol': 1e-12})
         uvec = result.x
         error = np.linalg.norm(self.get_glob_rdm_diff(uvec))
         if result.success == False:     
@@ -910,15 +903,8 @@ class pDMET:
         else:
             tprint.print_msg('Band structure error: %12.8f' % (error))
             
-        # DEBUG:    
-        print(self.uvec2umat(uvec))
+
         loc_OEH_kpts = self.get_loc_OEH_kpts(self.uvec2umat(uvec))
-        print(loc_OEH_kpts)
-        eigvals, eigvecs = np.linalg.eigh(loc_OEH_kpts)
-        print("------")
-        print(eigvals) 
-        
-        
         eigvals, eigvecs = np.linalg.eigh(loc_OEH_kpts)
         idx_kpts = eigvals.argsort()
         eigvals = np.asarray([eigvals[kpt][idx_kpts[kpt]] for kpt in range(self.Nkpts)], dtype=np.float64)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python -u 
 '''
-This Gaussian density fitting is provided by:
+The Gaussian density fitting is provided by:
     Zhihao Cui <zcui@caltech.edu>
     Tianyu Zhu <tyzhu@caltech.edu>
     ref: https://arxiv.org/abs/1909.08596 and https://arxiv.org/abs/1909.08592
@@ -53,7 +53,7 @@ def _Lij_s4_to_eri(Lij_s4, eri, nkpts, extra_Lij_factor=1.0):
         lib.dot(Lij_s4[1].conj().T, Lij_s4[1], 1, eri[2], 1) 
     return
         
-def get_emb_eri_fast(cell, mydf, ao2eo, feri=None, \
+def get_emb_eri_gdf(cell, mydf, ao2eo, feri=None, \
         kscaled_center=None, symmetry=1, max_memory=2000, kconserv_tol=1e-12):
     '''
     Fast routine to compute embedding space ERI on the fly
@@ -101,7 +101,63 @@ def get_emb_eri_fast(cell, mydf, ao2eo, feri=None, \
         Lij_s4 = _pack_tril(Lij_emb)
         _Lij_s4_to_eri(Lij_s4, eri, nkpts)
     eri_imag_norm = np.max(np.abs(eri.imag))
-    assert(eri_imag_norm < 1e-10)
+    assert(eri_imag_norm < 1e-9)
     eri = ao2mo.restore(symmetry, eri[0].real, nemb)[np.newaxis, ...] 
     return eri
+    
 
+'''TODO: there is lots of things to do here to implement the FFTDF '''
+
+def get_emb_eri_fftdf(cell, mydf, ao2eo, kscaled_center=None, symmetry=1, max_memory=2000, kconserv_tol=1e-12):
+    '''
+    Fast routine to compute embedding space ERI on the fly from a FFTDF
+    C_ao_lo: (nkpts, nao, nlo), transform matrix from AO to LO basis in k-space
+    basis: (spin, ncells, nlo, nemb), embedding basis
+    '''
+    # gdf variables
+    nao = cell.nao_nr()
+    kpts = mydf.kpts
+    nkpts = len(kpts)
+    ao2eo = ao2eo[np.newaxis, ...]
+
+    # possible kpts shift
+    kscaled = cell.get_scaled_kpts(kpts)
+    if kscaled_center is not None:
+        kscaled -= kscaled_center
+    
+    spin = ao2eo.shape[0]
+    nemb = ao2eo.shape[-1]
+    nemb_pair = nemb*(nemb+1) // 2
+    
+    # ERI construction
+    eri = np.zeros((spin*(spin+1)//2, nemb_pair, nemb_pair), dtype=np.complex128) 
+    
+    
+    for kL in range(nkpts):
+        Lij_emb = 0.0
+        for i, kpti in enumerate(kpts):
+            for j, kptj in enumerate(kpts):
+                kconserv = -kscaled[i] + kscaled[j] + kscaled[kL]
+                is_kconserv = la.norm(np.round(kconserv) - kconserv) < kconserv_tol 
+                if is_kconserv:
+                    Lij_emb_pq = []
+                    # Loop over L chunks
+                    for LpqR, LpqI, sign in mydf.sr_loop([kpti, kptj], max_memory=max_memory, compact=False):
+                        Lpq = (LpqR + LpqI*1.0j).reshape(-1, nao, nao)
+                        #Lij = _Lpq_to_Lij(Lpq, C_ao_lo, i, j)[0]
+                        Lij_emb_pq.append(_Lij_to_Lmn(Lpq, ao2eo, i, j).transpose(1, 0, 2, 3))
+                    # Lij_emb_pq: (spin, naux, nemb, nemb)
+                    Lij_emb_pq = np.vstack(Lij_emb_pq).reshape(-1, spin, nemb, nemb)
+                    Lij_emb_pq = Lij_emb_pq.transpose(1, 0, 2, 3)
+                    Lij_emb += Lij_emb_pq
+        Lij_s4 = _pack_tril(Lij_emb)
+        _Lij_s4_to_eri(Lij_s4, eri, nkpts)
+        
+        
+        
+    eri_imag_norm = np.max(np.abs(eri.imag))
+    assert(eri_imag_norm < 1e-10)
+    eri = ao2mo.restore(symmetry, eri[0].real, nemb)[np.newaxis, ...] 
+    
+    
+    return eri

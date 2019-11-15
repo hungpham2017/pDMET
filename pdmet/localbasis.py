@@ -100,6 +100,7 @@ class Local:
         self.actJK_kpts = self.fullfock_kpts - self.actOEI_kpts 
         self.loc_actJK_kpts = self.ao_2_loc(self.actJK_kpts, self.ao2lo)      #DEBUG: used to debug, may be removed 
         
+        
     def make_loc_1RDM_kpts(self, OEH_kpts):
         '''
         Construct 1-RDM at each k-point in the local basis using certain mean-field Hamiltonian
@@ -123,7 +124,6 @@ class Local:
         '''
         Construct the local 1-RDM at the reference unit cell
         '''    
-    
         loc_1RDM_kpts = self.make_loc_1RDM_kpts(OEH_kpts)
         loc_1RDM_R0 = self.k_to_R0(loc_1RDM_kpts)
         return loc_1RDM_kpts, loc_1RDM_R0
@@ -147,16 +147,19 @@ class Local:
         self.is_real(emb_fock_kpts)  
         return emb_fock_kpts.real
 
-    def get_emb_JK(self, ao2eo):
-        '''Get embedding JK used to get core JK in embedding basis without explicitly computing core JK in local basis'''   
-        emb_JK = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), self.actJK_kpts, ao2eo)
+    def get_emb_JK(self, loc_1RDM_kpts, ao2eo):
+        '''Get embedding JK from a local 1-RDM'''   
+        ao_1RDM_kpts = self.loc_2_ao(loc_1RDM_kpts)
+        ao_JK = self.kmf.get_veff(self.cell, ao_1RDM_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
+        emb_JK = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), ao_JK, ao2eo)
         self.is_real(emb_JK)
         return emb_JK.real 
         
-    def get_core_JK(self, lo2core, loc_OEH_kpts):
-        '''Get JK projected into the core (unentangled) basis'''   
-        loc_JK_kpts = loc_OEH_kpts - self.loc_actOEI_kpts
-        core_JK = lib.einsum('kum,kuv,kvn->mn', lo2core.conj(), loc_JK_kpts, lo2core)
+    def get_core_JK(self, ao2core, loc_core_1RDM):
+        '''Get JK projected into the core (unentangled) basis''' 
+        ao_core_kpts = self.loc_2_ao(loc_core_1RDM)
+        ao_core_JK = self.kmf.get_veff(self.cell, ao_core_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
+        core_JK = lib.einsum('kum,kuv,kvn->mn', ao2core.conj(), ao_core_JK, ao2core)
         self.is_real(core_JK)
         return core_JK.real 
 
@@ -176,7 +179,7 @@ class Local:
     def get_emb_TEI(self, ao2eo):
         '''Get embedding TEI with density fitting'''
         mydf = self.kmf.with_df   
-        TEI = df.get_emb_eri_fast(self.cell, mydf, ao2eo)[0]       
+        TEI = df.get_emb_eri_gdf(self.cell, mydf, ao2eo)[0]       
         return TEI
         
     def get_TEI(self, ao2eo): 

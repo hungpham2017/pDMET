@@ -367,7 +367,7 @@ class QCsolvers:
         '''        
 
         Nimp = self.Nimp
-        FOCKcopy = self.FOCK.copy() - self.chempot
+        FOCKcopy = self.FOCK.copy() - self.chempot 
                 
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)

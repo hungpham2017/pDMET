@@ -89,15 +89,15 @@ def get_bath_using_gamma_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.
         
     TODO: this was used to debug only, will be removed permanently
     '''    
-    
+
     NR, Nimp, Nimp = supercell_1RDM.shape
     Nlo = NR * Nimp
     imp_indices = np.asarray(imp_indices)
     env_indices = np.matrix(1 - imp_indices) 
-    env_frag_mask = env_indices.T.dot(env_indices) == 1
+    env_mask = env_indices.T.dot(env_indices) == 1
     Nimp = np.int32(imp_indices.sum())
     Nenv = Nlo - Nimp
-    emb_1RDM = supercell_1RDM[0][env_frag_mask].reshape(Nenv, Nenv) 
+    emb_1RDM = supercell_1RDM[0][env_mask].reshape(Nenv, Nenv) 
         
     sigma, U = np.linalg.eigh(emb_1RDM)
     distance_from_1 = np.abs(sigma - 1)
@@ -139,3 +139,4 @@ def get_bath_using_gamma_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.
     assert(np.linalg.norm(np.dot(emb_orbs.T, emb_orbs) - np.identity(Nemb)) < 1e-12 ), "WARNING: The embedding orbitals is not orthogonal"
 
     return emb_orbs, env_orbs, Nbath
+    
