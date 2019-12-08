@@ -113,7 +113,7 @@ class pDMET:
         # -------------------------------------------------        
         # General initialized attributes 
         self.kmesh = self.w90.mp_grid_loc
-        if self.kmf_chkfile is not None:
+        if (self.kmf_chkfile is not None) and hasattr(self.kmf.with_df, '_cderi'):
             self.kmf = tchkfile.load_kmf(self.cell, self.kmf, self.kmesh, self.kmf_chkfile, max_memory=self.max_memory)
             if self.kmf.with_df._cderi == None:
                 if tunix.check_exist('gdf.h5'):

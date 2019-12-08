@@ -101,7 +101,17 @@ def load_kmf(cell, kmf, kmesh, chkfile, max_memory=4000):
             self.get_hcore  = lambda *arg, **kwargs: kmf.get_hcore(*arg, **kwargs)
             self.get_jk     = lambda *arg, **kwargs: kmf.get_jk(*arg, **kwargs)
             self.get_veff   = lambda *arg, **kwargs: kmf.get_veff(*arg, **kwargs)
-            self.get_bands  = lambda *arg, **kwargs: kmf.get_bands(*arg, **kwargs) 
+            
+            def get_bands(*arg, **kwargs):
+                '''Making a wrapper for the get_bands function'''
+                if "dm_kpts" in kwargs:              
+                    return kmf.get_bands(*arg, **kwargs) 
+                else:
+                    dm_kpts = self.make_rdm1()                
+                    return kmf.get_bands(*arg, **kwargs, dm_kpts=dm_kpts) 
+
+            self.get_bands = get_bands
+            
             if hasattr(kmf,'max_memory'):
                 self.max_memory = kmf.max_memory
             else:
@@ -147,52 +157,6 @@ def load_w90(chkfile):
             
     w90 = fake_w90(save_w90)
     return w90    
-
-def save_pdmet_int(integral, chkfile):
-    CO                  = integral.CO
-    WFs                 = integral.WFs    
-    e_core              = integral.e_core
-    coreDM_kpts         = integral.coreDM_kpts
-    loc_actOEI_kpts     = integral.loc_actOEI_kpts
-    loc_actOEI_Ls       = integral.loc_actOEI_Ls
-    loc_actTEI_kpts     = integral.loc_actTEI_kpts    
-    loc_actTEI_Ls       = integral.loc_actTEI_Ls
-    loc_actFOCK_kpts    = integral.loc_actFOCK_kpts    
-    loc_actFOCK_Ls      = integral.loc_actFOCK_Ls 
-    loc_actVHF_kpts     = integral.loc_actVHF_kpts 
-    
-    integral_dic = {'CO'              : CO, 
-                'WFs'                 : WFs,
-                'e_core'              : e_core,  
-                'coreDM_kpts'         : coreDM_kpts,                  
-                'loc_actOEI_kpts'     : loc_actOEI_kpts,
-                'loc_actOEI_Ls'       : loc_actOEI_Ls,
-                'loc_actTEI_kpts'     : loc_actTEI_kpts,    
-                'loc_actTEI_Ls'       : loc_actTEI_Ls,
-                'loc_actFOCK_kpts'    : loc_actFOCK_kpts,    
-                'loc_actFOCK_Ls'      : loc_actFOCK_Ls,
-                'loc_actVHF_kpts'     : loc_actVHF_kpts}
-                
-    save(chkfile, 'integral', integral_dic)
-    
-def load_pdmet_int(chkfile):
-    save_pdmet = load(chkfile, 'integral')
-    class fake_pdmet:
-        def __init__(self, save_pdmet):
-            self.CO                  = save_pdmet['CO']
-            self.WFs                 = save_pdmet['WFs']    
-            self.e_core              = save_pdmet['e_core']
-            self.coreDM_kpts         = save_pdmet['coreDM_kpts']            
-            self.loc_actOEI_kpts     = save_pdmet['loc_actOEI_kpts']
-            self.loc_actOEI_Ls       = save_pdmet['loc_actOEI_Ls']
-            self.loc_actTEI_kpts     = save_pdmet['loc_actTEI_kpts']    
-            self.loc_actTEI_Ls       = save_pdmet['loc_actTEI_Ls']
-            self.loc_actFOCK_kpts    = save_pdmet['loc_actFOCK_kpts']    
-            self.loc_actFOCK_Ls      = save_pdmet['loc_actFOCK_Ls'] 
-            self.loc_actVHF_kpts     = save_pdmet['loc_actVHF_kpts'] 
-            
-    pdmet = fake_pdmet(save_pdmet)
-    return pdmet     
     
 def save_pdmet(pdmet, chkfile):
     solver        = pdmet.solver
