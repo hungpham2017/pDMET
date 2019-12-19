@@ -22,7 +22,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 import numpy as np
 from pyscf import lib
 import time
-from pDMET.tools import tunix
+from pdmet.tools import tunix
      
         
 class DIIS:

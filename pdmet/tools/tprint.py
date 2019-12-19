@@ -20,7 +20,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 '''
 
 import os, datetime
-from pDMET import pdmet
+import pdmet
 import sys
             
 def print_header():  

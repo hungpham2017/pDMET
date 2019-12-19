@@ -21,7 +21,6 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 
 import numpy as np
 import os, datetime
-from pDMET import pdmet
 from pyscf.scf import hf
 from pyscf import lib
 import pyscf.data.nist as param

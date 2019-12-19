@@ -24,9 +24,8 @@ import scipy
 from functools import reduce
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf import lib, ao2mo
-from pDMET.tools import tchkfile, tunix
-from pDMET.pdmet import helper, df
-from pDMET.lib.build import libdmet
+from pdmet import helper, df
+from pdmet.tools import tchkfile, tunix
 
     
     

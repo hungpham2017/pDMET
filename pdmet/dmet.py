@@ -24,10 +24,10 @@ import numpy as np
 from pyscf import lib
 from scipy import optimize
 from functools import reduce
-from pDMET.pdmet import localbasis, qcsolvers, diis, helper
-from pDMET.pdmet.schmidtbasis import get_bath_using_RHF_1RDM, get_bath_using_gamma_RHF_1RDM
-from pDMET.tools import tchkfile, tplot, tprint, tunix
-from pDMET.lib.build import libdmet
+from pdmet import localbasis, qcsolvers, diis, helper
+from pdmet.schmidtbasis import get_bath_using_RHF_1RDM, get_bath_using_gamma_RHF_1RDM
+from pdmet.tools import tchkfile, tplot, tprint, tunix
+from pdmet.lib.build import libdmet
 
 
 

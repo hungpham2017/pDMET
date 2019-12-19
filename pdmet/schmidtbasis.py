@@ -20,9 +20,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 '''
 
 import numpy as np
-from pDMET.lib.build import libdmet
-    
-        
+       
             
 def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
     '''
