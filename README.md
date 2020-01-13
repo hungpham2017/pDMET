@@ -13,9 +13,9 @@ pDMET can compute the ground-state energy as well as the quasiparticle band stru
 - One-shot and self-consistent pDMET calculation
 - Computing electronic band structure
 
-# Future function
-- MPI for Fast Fourier transform for ERI
-- Excited state and spin systems
+# How to cite?
+Please cite this paper when you use pDMET code in your research:
+H. Q. Pham, M. R. Hermes, L. Gagliardi; Periodic Electronic Structure Calculations with the Density Matrix Embedding Theory, [**J. Chem. Theory Comput.**, **2019**](https://pubs.acs.org/doi/abs/10.1021/acs.jctc.9b00939), ASAP.
 
 # Acknowledgment: 
 This work is supported by the U.S. Department of Energy, Office of Basic Energy Sciences, Division of Chemical Sciences, Geosciences and Biosciences through the Nanoporous Materials Genome Center under award DE-FG02-17ER16362.
