@@ -24,7 +24,8 @@ import scipy
 from functools import reduce
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf import lib, ao2mo
-from pdmet import helper, df
+from pyscf.pbc import scf
+from pdmet import helper, df, dfcf
 from pdmet.tools import tchkfile, tunix
 
     
@@ -99,12 +100,30 @@ class Local:
         self.actJK_kpts = self.fullfock_kpts - self.actOEI_kpts 
         self.loc_actJK_kpts = self.ao_2_loc(self.actJK_kpts, self.ao2lo)      #DEBUG: used to debug, may be removed 
         
+        #DEBUG DFT-DMET
+        dm_kpts = self.kmf.make_rdm1()
+        self.vj, self.vk = self.kmf.get_jk(dm_kpts=dm_kpts)
+        self.dm = self.kmf.make_rdm1()
+        self.h_core = self.kmf.get_hcore()
+        #self.vklr = self.kmf.get_k(self.cell, self.dm, 1, self.kpts, None, omega=0.11)
         
-    def make_loc_1RDM_kpts(self, OEH_kpts):
+        from pyscf.pbc.dft import multigrid
+        self.kks = scf.KKS(self.cell, self.kpts).density_fit()
+        self.kks.with_df._cderi = self.kmf.with_df._cderi       
+        
+        
+    def make_loc_1RDM_kpts(self, umat, OEH_type='FOCK', get_band=False):
         '''
-        Construct 1-RDM at each k-point in the local basis using certain mean-field Hamiltonian
+        Construct 1-RDM at each k-point in the local basis given a u mat
         '''    
-  
+        
+        # Get modified mean-field Hamiltinian: h_tilder = h + u
+        if OEH_type == 'FOCK':
+            OEH_kpts = self.loc_actFOCK_kpts + umat  
+        else:
+            # For DF-like cost function
+            OEH_kpts = dfcf.get_OEH_kpts(self, umat, xc_type=OEH_type)
+            
         if self.spin == 0:
             eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
             idx_kpts = eigvals.argsort()
@@ -113,17 +132,21 @@ class Local:
             mo_occ = helper.get_occ_r(self.nelec_total, eigvals)  
             loc_OED = np.asarray([np.dot(eigvecs[kpt][:,mo_occ[kpt]>0]*mo_occ[kpt][mo_occ[kpt]>0], eigvecs[kpt][:,mo_occ[kpt]>0].T.conj())
                                                 for kpt in range(self.Nkpts)], dtype=np.complex128)       
-            
-            return loc_OED
+
+            print("Eigenvalues at Gamma",eigvals[0]) 
+            if get_band == True:
+                return eigvals, eigvecs
+            else:
+                return loc_OED
         else:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
         
-    def make_loc_1RDM(self, OEH_kpts):
+    def make_loc_1RDM(self, umat, OEH_type='FOCK'):
         '''
         Construct the local 1-RDM at the reference unit cell
         '''    
-        loc_1RDM_kpts = self.make_loc_1RDM_kpts(OEH_kpts)
+        loc_1RDM_kpts = self.make_loc_1RDM_kpts(umat, OEH_type)
         loc_1RDM_R0 = self.k_to_R0(loc_1RDM_kpts)
         return loc_1RDM_kpts, loc_1RDM_R0
         
@@ -237,10 +260,10 @@ class Local:
         loc_coreJK_kpts = lib.einsum('kim,mn,kjn->kij', lo2eo, emb_matrix, lo2eo.conj())
         return loc_coreJK_kpts
         
-    def loc_kpts_to_emb(self, RDM_deriv_kpts, emb_orbs):
-        '''Transform k-space 1-RDM gradient in local basis to embedding basis'''   
+    def loc_kpts_to_emb(self, RDM_kpts, emb_orbs):
+        '''Transform k-space 1-RDM in local basis to embedding basis'''   
         lo2eo = lib.einsum('Rk, Rim -> kim', self.phase.conj(), emb_orbs) 
-        emb_1RDM = lib.einsum('kim, kij, kjn -> mn', lo2eo.conj(), RDM_deriv_kpts, lo2eo)
+        emb_1RDM = lib.einsum('kim, kij, kjn -> mn', lo2eo.conj(), RDM_kpts, lo2eo)
         self.is_real(emb_1RDM)
         return emb_1RDM.real 
         
@@ -252,13 +275,13 @@ class Local:
         emb_mf_1RDM = 2 * np.dot(C[:,:npairs], C[:,:npairs].T.conj())
         return emb_mf_1RDM
         
-    def get_emb_guess_1RDM(self, emb_FOCK, Nimp, Nelec_in_emb, chempot):
+    def get_emb_guess_1RDM(self, emb_FOCK, Nelec_in_emb, Nimp, chempot):
         '''Get guessing 1RDM for the embedding problem''' 
         Nemb = emb_FOCK.shape[0]
         npairs = Nelec_in_emb // 2
-        chempot_array = np.zeros(Nemb)
-        chempot_array[:Nimp] = chempot
-        emb_FOCK = emb_FOCK - np.diag(chempot_array)
+        chempot_vector = np.zeros(Nemb)
+        chempot_vector[:Nimp] = chempot
+        emb_FOCK = emb_FOCK - np.diag(chempot_vector)
         sigma, C = np.linalg.eigh(emb_FOCK)
         C = C[:, sigma.argsort()]
         DMguess = 2 * np.dot(C[:,:npairs], C[:,:npairs].T.conj())
@@ -383,9 +406,9 @@ class Local:
         ''' 
         NRs, nao = M_R0.shape[:2]
         M_kpts = lib.einsum('Rk,Ruv,k->kuv', self.phase.conj(), M_R0, self.phase[0])
-        return M_kpts
+        return M_kpts * NRs
         
-    def is_real(self, M, threshold=1.e-7):
+    def is_real(self, M, threshold=1.e-6):
         '''Check if a matrix is real with a threshold'''
         assert(abs(M.imag).max() < threshold), 'The imaginary part is larger than %s' % (str(threshold)) 
    

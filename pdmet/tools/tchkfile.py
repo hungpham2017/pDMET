@@ -99,6 +99,8 @@ def load_kmf(cell, kmf, kmesh, chkfile, max_memory=4000):
             self.eig        = lambda *arg, **kwargs: kmf.eig(*arg, **kwargs)
             self.get_ovlp   = lambda *arg, **kwargs: kmf.get_ovlp(*arg, **kwargs)
             self.get_hcore  = lambda *arg, **kwargs: kmf.get_hcore(*arg, **kwargs)
+            self.get_j      = lambda *arg, **kwargs: kmf.get_j(*arg, **kwargs)
+            self.get_k      = lambda *arg, **kwargs: kmf.get_k(*arg, **kwargs)
             self.get_jk     = lambda *arg, **kwargs: kmf.get_jk(*arg, **kwargs)
             self.get_veff   = lambda *arg, **kwargs: kmf.get_veff(*arg, **kwargs)
             

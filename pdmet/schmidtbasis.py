@@ -50,6 +50,7 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
        
     U, sigma, Vh = np.linalg.svd(emb_1RDM, full_matrices=True)
     distance_from_1 = np.abs(np.sqrt(np.abs(1-sigma**2)))
+    
     idx = (distance_from_1).argsort()
     distance_from_1 = distance_from_1[idx]
     sigma = sigma[idx]

@@ -198,7 +198,7 @@ class QCsolvers:
         if self.cc.converged == False: print('           WARNING: The solver is not converged')        
         RDM1_mo = self.cc.make_rdm1()
         RDM2_mo = self.cc.make_rdm2()  
-        
+
         # Transform RDM1 , RDM2 to local basis
         RDM1 = lib.einsum('ap,pq->aq', self.mf.mo_coeff, RDM1_mo)
         RDM1 = lib.einsum('bq,aq->ab', self.mf.mo_coeff, RDM1)     
