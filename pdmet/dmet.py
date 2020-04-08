@@ -79,6 +79,7 @@ class pDMET:
         self.is_umat_kpts       = False
         self.alt_CF             = False 
         self.dft_CF             = False
+        self.dft_CF_constraint  = 1
         self.xc                 = 'PBE0'
         self.damping            = 1.0 # 1.0 means no damping
         self.DIIS               = False       
@@ -444,7 +445,7 @@ class pDMET:
 
             # Optimize uvec to minimize the cost function
             if self.dft_CF == True:
-                result = optimize.minimize(self.CF, self.uvec, method='L-BFGS-B', jac=None, options={'disp': False, 'gtol': 1e-6}, bounds=self.bounds)
+                result = optimize.minimize(self.CF, self.uvec, method='L-BFGS-B', jac=None, options={'disp': False, 'gtol': 1e-6, 'eps': 1e-4}, bounds=self.bounds)
             else:
                 result = optimize.minimize(self.CF, self.uvec, method=self.SC_method, jac=self.CF_grad, options={'disp': False, 'gtol': 1e-12})
                 # result = optimize.minimize(self.CF, self.uvec, method = self.SC_method , options = {'disp': False, 'gtol': 1e-12})
