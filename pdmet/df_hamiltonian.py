@@ -167,6 +167,25 @@ GGA_C = {
 }
 
 
+'''Smaller set of XC to test'''
+GGA_X = {
+'GGA_X_EV93'                   : 35 , # E. Engel and S. H. Vosko, Phys. Rev. B 47, 13164 (1993)
+'GGA_X_BCGP'                   : 38 , # K. Burke, A. Cancio, T. Gould, and S. Pittalis, ArXiv e-prints (2014), arXiv:1409.4834 [cond-mat.mtrl-sci]
+'GGA_X_LAMBDA_OC2_N'           : 40 , # M. M. Odashima, K. Capelle, and S. B. Trickey, J. Chem. Theory Comput. 5, 798 (2009)
+'GGA_X_B86_R'                  : 41 , # I. Hamada, Phys. Rev. B 89, 121103 (2014)
+'GGA_X_LAMBDA_CH_N'            : 44 , # M. M. Odashima, K. Capelle, and S. B. Trickey, J. Chem. Theory Comput. 5, 798 (2009)
+}
+
+GGA_C = {
+'GGA_C_GAM'                    : 33 , # H. S. Yu, W. Zhang, P. Verma, X. He, and D. G. Truhlar, Phys. Chem. Chem. Phys. 17, 12146 (2015)
+'GGA_C_BCGP'                   : 39 , # K. Burke, A. Cancio, T. Gould, and S. Pittalis, ArXiv e-prints (2014), arXiv:1409.4834 [cond-mat.mtrl-sci]
+'GGA_C_Q2D'                    : 47 , # L. Chiodo, L. A. Constantin, E. Fabiano, and F. Della Sala, Phys. Rev. Lett. 108, 126402 (2012)
+'GGA_C_ZPBEINT'                : 61 , # L. A. Constantin, E. Fabiano, and F. Della Sala, Phys. Rev. B 84, 233103 (2011)
+'GGA_C_PBEINT'                 : 62 , # E. Fabiano, L. A. Constantin, and F. Della Sala, Phys. Rev. B 82, 113104 (2010)
+'GGA_C_ZPBESOL'                : 63 , # L. A. Constantin, E. Fabiano, and F. Della Sala, Phys. Rev. B 84, 233103 (2011)
+}
+
+
 def get_init_uvec(xc_type='PBE0'):
     '''Initialize uvec corresponding to each type of the DF-like cost function'''
     if xc_type == 'PBE0':
@@ -248,14 +267,6 @@ def get_OEH_kpts(local, umat, xc_type='PBE0'):
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
 
-    elif xc_type == 'CAMB3LYP':
-        # TODO: need to debug
-        xc =  '{:.12f}*SR_HF({:.12f}) + {:.12f}*LR_HF({:.12f}) + {:.12f}*ITYH + {:.12f}*B88, {:.12f}*VWN5 + {:.12f}*LYP'.format(umat)
-        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
-        veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
-        OEH_kpts = local.h_core + veff
-        OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
-        
     elif xc_type == 'RSH-PBE0':
         xc =  "{:.12f}*SR_HF({:.12f})+ {:.12f}*PBE, {:.12f}*PBE".format(*umat)
         n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
@@ -264,6 +275,14 @@ def get_OEH_kpts(local, umat, xc_type='PBE0'):
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo)
         
+    elif xc_type == 'CAMB3LYP':
+        # TODO: need to debug
+        xc =  '{:.12f}*SR_HF({:.12f}) + {:.12f}*LR_HF({:.12f}) + {:.12f}*ITYH + {:.12f}*B88, {:.12f}*VWN5 + {:.12f}*LYP'.format(umat)
+        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
+        veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
+        OEH_kpts = local.h_core + veff
+        OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
+
     elif xc_type == 'manyGGA':
         x = '{:.12f}*HF + {:.12f}*' + '+ {:.12f}*'.join(GGA_X.keys())
         c = ', {:.12f}*' + '+ {:.12f}*'.join(GGA_C.keys())
@@ -272,8 +291,6 @@ def get_OEH_kpts(local, umat, xc_type='PBE0'):
         veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
-        
-    print("DEBUG xc", xc) 
         
     return OEH_kpts
     

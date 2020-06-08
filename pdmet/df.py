@@ -101,7 +101,7 @@ def get_emb_eri_gdf(cell, mydf, ao2eo, feri=None, \
         Lij_s4 = _pack_tril(Lij_emb)
         _Lij_s4_to_eri(Lij_s4, eri, nkpts)
     eri_imag_norm = np.max(np.abs(eri.imag))
-    assert(eri_imag_norm < 1e-9)
+    assert(eri_imag_norm < 1e-8)
     eri = ao2mo.restore(symmetry, eri[0].real, nemb)[np.newaxis, ...] 
     return eri
     
@@ -156,7 +156,7 @@ def get_emb_eri_fftdf(cell, mydf, ao2eo, kscaled_center=None, symmetry=1, max_me
         
         
     eri_imag_norm = np.max(np.abs(eri.imag))
-    assert(eri_imag_norm < 1e-10)
+    assert(eri_imag_norm < 1e-8)
     eri = ao2mo.restore(symmetry, eri[0].real, nemb)[np.newaxis, ...] 
     
     

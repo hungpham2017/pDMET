@@ -24,7 +24,7 @@ import numpy as np
 from pyscf import lib
 from scipy import optimize
 from functools import reduce
-from pdmet import localbasis, qcsolvers, diis, helper, dfcf
+from pdmet import localbasis, qcsolvers, diis, helper, df_hamiltonian
 from pdmet.schmidtbasis import get_bath_using_RHF_1RDM, get_bath_using_gamma_RHF_1RDM
 from pdmet.tools import tchkfile, tplot, tprint, tunix
 from pdmet.lib.build import libdmet
@@ -185,8 +185,8 @@ class pDMET:
                   
         self.chempot = 0.0
         if self.dft_CF is True:
-            self.uvec = dfcf.get_init_uvec(self.xc)
-            self.bounds = dfcf.get_bounds(self.xc)          
+            self.uvec = df_hamiltonian.get_init_uvec(self.xc)
+            self.bounds = df_hamiltonian.get_bounds(self.xc)          
         else:
             self.uvec = np.zeros(self.Nterms, dtype=np.float64)           
         self.umat = self.uvec2umat(self.uvec)
@@ -353,7 +353,7 @@ class pDMET:
         tprint.print_msg("--------------------------------------------------------------------")   
         
         if self.dft_CF is True:
-            umat = dfcf.get_init_uvec(self.xc)
+            umat = df_hamiltonian.get_init_uvec(self.xc)
         else:
             umat = 0.
             

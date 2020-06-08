@@ -25,7 +25,7 @@ from functools import reduce
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf import lib, ao2mo
 from pyscf.pbc import scf
-from pdmet import helper, df, dfcf
+from pdmet import helper, df, df_hamiltonian
 from pdmet.tools import tchkfile, tunix
 
     
@@ -65,23 +65,19 @@ class Local:
         #-------------------------------------------------------------
         # Construct the effective Hamiltonian due to the frozen core  | 
         #-------------------------------------------------------------  
-        
-        # Active part info
-        self.active = np.zeros([cell.nao_nr()], dtype=int)
+        self.nelec_total = 0
+        for mo_occ in kmf.mo_occ_kpts:
+            self.nelec_total += int(mo_occ[w90.band_included_list].sum())
+        self.nelec_per_cell = self.nelec_total // self.Nkpts
 
-        for orb in range(cell.nao_nr()):
-            if (orb+1) not in w90.exclude_bands: self.active[orb] = 1  
-        self.nelec_per_cell = np.int32(cell.nelectron - np.sum(kmf.mo_occ_kpts[0][self.active==0]))     
-        self.nelec_total = self.Nkpts * self.nelec_per_cell             # per computional super cell
-
-        
         full_OEI_k = kmf.get_hcore()
-        mo_k = kmf.mo_coeff_kpts
         coreDM_kpts = []
-        for kpt in range(self.Nkpts):
-            coreDMmo  = kmf.mo_occ_kpts[kpt].copy()
-            coreDMmo[self.active==1] = 0
-            coreDMao = reduce(np.dot, (mo_k[kpt], np.diag(coreDMmo), mo_k[kpt].T.conj()))
+        for kpt, mo_coeff in enumerate(kmf.mo_coeff_kpts):
+            core_band = np.asarray(mo_coeff.shape[1] * [True])
+            core_band[w90.band_included_list] = False
+            coreDMmo  = kmf.mo_occ_kpts[kpt][core_band].copy()
+            mo_k = mo_coeff[:, core_band]
+            coreDMao = reduce(np.dot, (mo_k, np.diag(coreDMmo), mo_k.T.conj()))
             coreDM_kpts.append(coreDMao)
     
         self.coreDM_kpts = np.asarray(coreDM_kpts, dtype=np.complex128)
@@ -122,7 +118,7 @@ class Local:
             OEH_kpts = self.loc_actFOCK_kpts + umat  
         else:
             # For DF-like cost function
-            OEH_kpts = dfcf.get_OEH_kpts(self, umat, xc_type=OEH_type)
+            OEH_kpts = df_hamiltonian.get_OEH_kpts(self, umat, xc_type=OEH_type)
             
         if self.spin == 0:
             eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
@@ -329,7 +325,7 @@ class Local:
         for kpt in range(self.Nkpts):
             mo_included = w90.mo_coeff_kpts[kpt][:,w90.band_included_list]
             mo_in_window = w90.lwindow[kpt]         
-            C_opt = mo_included[:,mo_in_window].dot(w90.U_matrix_opt[kpt].T)           
+            C_opt = mo_included[:,mo_in_window].dot(w90.U_matrix_opt[kpt][ :, mo_in_window].T)           
             ao2lo.append(C_opt.dot(w90.U_matrix[kpt].T))        
            
         ao2lo = np.asarray(ao2lo, dtype=np.complex128)
