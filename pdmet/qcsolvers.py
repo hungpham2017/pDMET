@@ -24,7 +24,7 @@ import sys, os, ctypes
 from functools import reduce
 import PyCheMPS2
 import pyscf
-from pyscf import lib, gto, ao2mo, scf, cc, fci, mcscf, dmrgscf 
+from pyscf import lib, gto, ao2mo, scf, cc, fci, mcscf
 # from pyscf import dmrgscf 
 # from pyscf.shciscf import shci 
 
