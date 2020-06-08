@@ -129,7 +129,6 @@ class Local:
             loc_OED = np.asarray([np.dot(eigvecs[kpt][:,mo_occ[kpt]>0]*mo_occ[kpt][mo_occ[kpt]>0], eigvecs[kpt][:,mo_occ[kpt]>0].T.conj())
                                                 for kpt in range(self.Nkpts)], dtype=np.complex128)       
 
-            print("Eigenvalues at Gamma",eigvals[0]) 
             if get_band == True:
                 return eigvals, eigvecs
             else:

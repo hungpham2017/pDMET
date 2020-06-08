@@ -25,7 +25,9 @@ from functools import reduce
 import PyCheMPS2
 import pyscf
 from pyscf import lib, gto, ao2mo, scf, cc, fci, mcscf, dmrgscf 
-#from pyscf.shciscf import shci 
+# from pyscf import dmrgscf 
+# from pyscf.shciscf import shci 
+
 
 class QCsolvers:
     def __init__(self, solver, twoS = 0, e_shift = None, nroots = 1, state_percent = None, verbose = 0, memory = 4000):

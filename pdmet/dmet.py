@@ -483,8 +483,6 @@ class pDMET:
             # Export band structure at every cycle:
             if get_band:
                 band = self.get_bands()
-                print("BAND", band.mo_energy_kpts[0])
-                print("Gap", 27.211*(band.mo_energy_kpts[0][4] - band.mo_energy_kpts[0][3]))
                 pywannier90.save_kmf(band, str(self.solver) + '_band_cyc_' + str(cycle + 1))               
                 
             # Check convergence of 1-RDM            
@@ -927,11 +925,17 @@ class pDMET:
             eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), OEH_type=self.xc, get_band=True)
         else:
             eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), OEH_type='FOCK', get_band=True)
-        
-        mo_coeff_kpts = np.asarray(self.kmf.mo_coeff_kpts)
-        mo_energy_kpts = np.asarray(self.kmf.mo_energy_kpts)
-        mo_coeff_kpts[:,:,self.w90.band_included_list] = lib.einsum('kpq,kqr->kpr',self.local.ao2lo,eigvecs)
-        mo_energy_kpts[:,self.w90.band_included_list] = eigvals
+
+        dmet_orbs = lib.einsum('kpq,kqr->kpr', self.local.ao2lo, eigvecs) # embedding orbs are spaned by AO instead of MLWFs here
+        mo_coeff_kpts = []
+        mo_energy_kpts = []
+        for kpt in range(self.Nkpts):
+            mo_coeff = self.kmf.mo_coeff_kpts[kpt].copy()
+            mo_coeff[:, self.w90.band_included_list] = dmet_orbs[kpt]
+            mo_energy = self.kmf.mo_energy_kpts[kpt].copy()
+            mo_energy[self.w90.band_included_list] = eigvals[kpt]
+            mo_coeff_kpts.append(mo_coeff)
+            mo_energy_kpts.append(mo_energy)
             
         ovlp = self.kmf.get_ovlp()
         class fake_kmf:
