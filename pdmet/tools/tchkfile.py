@@ -131,8 +131,15 @@ def save_w90(w90, chkfile):
     mo_coeff_kpts      = w90.mo_coeff_kpts
     band_included_list = w90.band_included_list
     lwindow            = w90.lwindow
+    M_matrix_loc       = w90.M_matrix_loc  
+    A_matrix_loc       = w90.A_matrix_loc     
+    eigenvalues_loc    = w90.eigenvalues_loc  
     U_matrix_opt       = w90.U_matrix_opt
     U_matrix           = w90.U_matrix
+    wann_centres       = w90.wann_centres
+    wann_spreads       = w90.wann_spreads
+    spread             = w90.spread
+    
     w90_dic = { 'mp_grid_loc'           : mp_grid_loc, 
                 'exclude_bands'         : exclude_bands,
                 'mp_grid_loc'           : mp_grid_loc,
@@ -140,24 +147,33 @@ def save_w90(w90, chkfile):
                 'band_included_list'    : band_included_list,
                 'lwindow'               : lwindow,
                 'U_matrix_opt'          : U_matrix_opt,
-                'U_matrix'              : U_matrix}
+                'U_matrix'              : U_matrix,
+                'M_matrix_loc'          : M_matrix_loc,  
+                'A_matrix_loc'          : A_matrix_loc,    
+                'eigenvalues_loc'       : eigenvalues_loc,  
+                'wann_centres'          : wann_centres,
+                'wann_spreads'          : wann_spreads,
+                'spread'                : spread}
                 
     save(chkfile, 'w90', w90_dic)
     
-def load_w90(chkfile):
+def load_w90(w90, chkfile):
     save_w90 = load(chkfile, 'w90')
-    class fake_w90:
-        def __init__(self, save_w90):
-            self.mp_grid_loc            = save_w90['mp_grid_loc']
-            self.exclude_bands          = save_w90['exclude_bands']
-            self.mp_grid_loc            = save_w90['mp_grid_loc']
-            self.mo_coeff_kpts          = save_w90['mo_coeff_kpts']
-            self.band_included_list     = save_w90['band_included_list']
-            self.lwindow                = save_w90['lwindow']
-            self.U_matrix_opt           = save_w90['U_matrix_opt']
-            self.U_matrix               = save_w90['U_matrix']   
-            
-    w90 = fake_w90(save_w90)
+    w90.mp_grid_loc            = save_w90['mp_grid_loc']
+    w90.exclude_bands          = save_w90['exclude_bands']
+    w90.mp_grid_loc            = save_w90['mp_grid_loc']
+    w90.mo_coeff_kpts          = save_w90['mo_coeff_kpts']
+    w90.band_included_list     = save_w90['band_included_list']
+    w90.lwindow                = save_w90['lwindow']
+    w90.U_matrix_opt           = save_w90['U_matrix_opt']
+    w90.U_matrix               = save_w90['U_matrix']   
+    w90.M_matrix_loc           = save_w90['M_matrix_loc']  
+    w90.A_matrix_loc           = save_w90['A_matrix_loc']     
+    w90.eigenvalues_loc        = save_w90['eigenvalues_loc']  
+    w90.wann_centres           = save_w90['wann_centres'] 
+    w90.wann_spreads           = save_w90['wann_spreads']
+    w90.spread                 = save_w90['spread']
+    
     return w90    
     
 def save_pdmet(pdmet, chkfile):

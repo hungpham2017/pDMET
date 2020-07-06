@@ -135,7 +135,7 @@ class pDMET:
             # to get the finite correction, see https://github.com/pyscf/pyscf/issues/250   
             
         if self.w90_chkfile is not None:
-            self.w90 = tchkfile.load_w90(self.w90_chkfile)
+            self.w90 = tchkfile.load_w90(self.w90, self.w90_chkfile)
         else:
             self.w90 = self.w90 
             
@@ -412,7 +412,7 @@ class pDMET:
         tprint.print_msg("-- One-shot DMET ... finished at %s" % (tunix.current_time()))
         tprint.print_msg()            
         
-    def self_consistent(self, get_band=False):
+    def self_consistent(self, get_band=False, interpolate_band=None):
         '''
         Do self-consistent pDMET
         '''    
@@ -485,6 +485,11 @@ class pDMET:
                 band = self.get_bands()
                 pywannier90.save_kmf(band, str(self.solver) + '_band_cyc_' + str(cycle + 1))               
                 
+            # DEBUG 
+            if interpolate_band is not None:
+                frac_kpts = interpolate_band
+                bands = self.interpolate_band(frac_kpts)          
+            
             # Check convergence of 1-RDM            
             if self.dft_CF == True:
                 if (norm_rdm <= self.SC_threshold): break
@@ -908,7 +913,7 @@ class pDMET:
             CF = self.glob_cost_func
             CF_grad = self.glob_cost_func_grad
        
-        if self.dft_CF == True and self.xc == 'PBE0':
+        if self.dft_CF and self.xc == 'PBE0':
             result = optimize.minimize(self.CF, self.uvec, method='L-BFGS-B', jac=None, options={'disp': False, 'gtol': 1e-6}, bounds=self.bounds)
         else:
             result = optimize.minimize(CF, self.uvec, method=method, jac=None, options={'disp': False, 'gtol': 1e-12})
@@ -921,7 +926,7 @@ class pDMET:
         else:
             tprint.print_msg('Band structure error: %12.8f' % (error))
             
-        if self.dft_CF == True:
+        if self.dft_CF:
             eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), OEH_type=self.xc, get_band=True)
         else:
             eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), OEH_type='FOCK', get_band=True)
@@ -949,29 +954,16 @@ class pDMET:
         
         return kmf
         
-    def get_bands_pDMET(self, loc_OEH_kpts, kpts=None):
-        '''GEt band structure from a p-DMET calculation.
-        '''     
-        eigvals, eigvecs = np.linalg.eigh(loc_OEH_kpts)
-        idx_kpts = eigvals.argsort()
-        eigvals = np.asarray([eigvals[kpt][idx_kpts[kpt]] for kpt in range(self.Nkpts)], dtype=np.float64)
-        eigvecs = np.asarray([eigvecs[kpt][:,idx_kpts[kpt]] for kpt in range(self.Nkpts)], dtype=np.complex128)
-        mo_coeff_kpts = np.asarray(self.kmf.mo_coeff_kpts)
-        mo_energy_kpts = np.asarray(self.kmf.mo_energy_kpts)
-        mo_coeff_kpts[:,:,self.w90.band_included_list] = lib.einsum('kpq,kqr->kpr',self.local.ao2lo,eigvecs)
-        mo_energy_kpts[:,self.w90.band_included_list] = eigvals
-            
-        ovlp = self.kmf.get_ovlp()
-        class fake_kmf:
-            def __init__(self):
-                self.kpts = kpts
-                self.mo_energy_kpts = mo_energy_kpts
-                self.mo_coeff_kpts = mo_coeff_kpts  
-                self.get_ovlp  = lambda *arg: ovlp
-                
-        kmf = fake_kmf()
-        
-        return kmf
+    def interpolate_band(self, frac_kpts, use_ws_distance=True, ws_search_size=[2,2,2], ws_distance_tol=1e-6):
+        ''' Interpolate the band structure using the Slater-Koster scheme
+            Return:
+                eigenvalues and eigenvectors at the desired kpts
+        '''
+        OEH_kpts, eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(self.uvec), OEH_type=self.xc, get_ham=True)
+        eigvals, eigvecs = self.w90.interpolate_band(frac_kpts, OEH_kpts, use_ws_distance, 
+                                                    ws_search_size, ws_distance_tol)
+        return (eigvals, eigvecs)
+    
         
     def get_supercell_Hamiltonian(self, twoS = 0):        
         '''Make mf object of the effective Hamiltonian for a molecular solver.

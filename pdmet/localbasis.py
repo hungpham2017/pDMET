@@ -108,7 +108,7 @@ class Local:
         self.kks.with_df._cderi = self.kmf.with_df._cderi       
         
         
-    def make_loc_1RDM_kpts(self, umat, OEH_type='FOCK', get_band=False):
+    def make_loc_1RDM_kpts(self, umat, OEH_type='FOCK', get_band=False, get_ham=False):
         '''
         Construct 1-RDM at each k-point in the local basis given a u mat
         '''    
@@ -129,8 +129,10 @@ class Local:
             loc_OED = np.asarray([np.dot(eigvecs[kpt][:,mo_occ[kpt]>0]*mo_occ[kpt][mo_occ[kpt]>0], eigvecs[kpt][:,mo_occ[kpt]>0].T.conj())
                                                 for kpt in range(self.Nkpts)], dtype=np.complex128)       
 
-            if get_band == True:
+            if get_band:
                 return eigvals, eigvecs
+            elif get_ham:
+                return OEH_kpts, eigvals, eigvecs
             else:
                 return loc_OED
         else:
