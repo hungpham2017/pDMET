@@ -31,7 +31,7 @@ from pdmet.tools import tchkfile, tunix
     
     
 class Local:
-    def __init__(self, cell, kmf, w90):
+    def __init__(self, cell, kmf, w90, xc_omega=0.2):
         '''
         TODO: need to be written
         Args:
@@ -96,19 +96,20 @@ class Local:
         self.actJK_kpts = self.fullfock_kpts - self.actOEI_kpts 
         self.loc_actJK_kpts = self.ao_2_loc(self.actJK_kpts, self.ao2lo)      #DEBUG: used to debug, may be removed 
         
-        #DEBUG DFT-DMET
+        # DF-like DMET
+        self.xc_omega = xc_omega
         dm_kpts = self.kmf.make_rdm1()
         self.vj, self.vk = self.kmf.get_jk(dm_kpts=dm_kpts)
         self.dm = self.kmf.make_rdm1()
         self.h_core = self.kmf.get_hcore()
-        #self.vklr = self.kmf.get_k(self.cell, self.dm, 1, self.kpts, None, omega=0.11)
         
-        from pyscf.pbc.dft import multigrid
-        self.kks = scf.KKS(self.cell, self.kpts).density_fit()
-        self.kks.with_df._cderi = self.kmf.with_df._cderi       
+        self.kks = scf.KKS(self.cell, self.kpts).density_fit()  
+        self.kks.with_df._cderi = self.kmf.with_df._cderi 
+        if self.xc_omega is not None:
+            self.vklr = self.kmf.get_k(self.cell, self.dm, 1, self.kpts, None, omega=self.xc_omega)
+            self.vksr = self.vk - self.vklr
         
-        
-    def make_loc_1RDM_kpts(self, umat, OEH_type='FOCK', get_band=False, get_ham=False):
+    def make_loc_1RDM_kpts(self, umat, OEH_type='FOCK', get_band=False, get_ham=False, dft_HF=None):
         '''
         Construct 1-RDM at each k-point in the local basis given a u mat
         '''    
@@ -118,7 +119,7 @@ class Local:
             OEH_kpts = self.loc_actFOCK_kpts + umat  
         else:
             # For DF-like cost function
-            OEH_kpts = df_hamiltonian.get_OEH_kpts(self, umat, xc_type=OEH_type)
+            OEH_kpts = df_hamiltonian.get_OEH_kpts(self, umat,  xc_type=OEH_type,  dft_HF=dft_HF)
             
         if self.spin == 0:
             eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
@@ -134,18 +135,18 @@ class Local:
             elif get_ham:
                 return OEH_kpts, eigvals, eigvecs
             else:
-                return loc_OED
+                return OEH_kpts, loc_OED
         else:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
         
-    def make_loc_1RDM(self, umat, OEH_type='FOCK'):
+    def make_loc_1RDM(self, umat, OEH_type='FOCK', dft_HF=None):
         '''
         Construct the local 1-RDM at the reference unit cell
         '''    
-        loc_1RDM_kpts = self.make_loc_1RDM_kpts(umat, OEH_type)
+        loc_OEH_kpts, loc_1RDM_kpts = self.make_loc_1RDM_kpts(umat, OEH_type=OEH_type, dft_HF=dft_HF)
         loc_1RDM_R0 = self.k_to_R0(loc_1RDM_kpts)
-        return loc_1RDM_kpts, loc_1RDM_R0
+        return loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0
         
     def get_emb_OEI(self, ao2eo):
         '''Get OEI projected into the embedding basis'''

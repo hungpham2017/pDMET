@@ -3,7 +3,7 @@ import setuptools
 if __name__ == "__main__":
     setuptools.setup(
         name='pDMET',
-        version="1.0.0",
+        version="1.3.0",
         description='Density matrix embedding theory for periodic systems',
         author='Hung Pham',
         author_email='pqh3.14@gmail.com',

@@ -169,39 +169,44 @@ GGA_C = {
 
 '''Smaller set of XC to test'''
 GGA_X = {
-'GGA_X_EV93'                   : 35 , # E. Engel and S. H. Vosko, Phys. Rev. B 47, 13164 (1993)
-'GGA_X_BCGP'                   : 38 , # K. Burke, A. Cancio, T. Gould, and S. Pittalis, ArXiv e-prints (2014), arXiv:1409.4834 [cond-mat.mtrl-sci]
-'GGA_X_LAMBDA_OC2_N'           : 40 , # M. M. Odashima, K. Capelle, and S. B. Trickey, J. Chem. Theory Comput. 5, 798 (2009)
-'GGA_X_B86_R'                  : 41 , # I. Hamada, Phys. Rev. B 89, 121103 (2014)
-'GGA_X_LAMBDA_CH_N'            : 44 , # M. M. Odashima, K. Capelle, and S. B. Trickey, J. Chem. Theory Comput. 5, 798 (2009)
+
+'GGA_X_PBE'                    : 101, # J. P. Perdew, K. Burke, and M. Ernzerhof, Phys. Rev. Lett. 77, 3865 (1996)
+'GGA_X_B88'                    : 106, # A. D. Becke, Phys. Rev. A 38, 3098 (1988)
+'GGA_X_PW91'                   : 109, # J. P. Perdew, in Proceedings of the 75. WE-Heraeus-Seminar and 21st Annual International Symposium on Electronic Structure of Solids, edited by P. Ziesche and H. Eschrig (Akademie Verlag, Berlin, 1991) p. 11
+'GGA_X_WC'                     : 118, # Z. Wu and R. E. Cohen, Phys. Rev. B 73, 235116 (2006)
+'GGA_X_AM05'                   : 120, # R. Armiento and A. E. Mattsson, Phys. Rev. B 72, 085108 (2005)
 }
 
 GGA_C = {
-'GGA_C_GAM'                    : 33 , # H. S. Yu, W. Zhang, P. Verma, X. He, and D. G. Truhlar, Phys. Chem. Chem. Phys. 17, 12146 (2015)
-'GGA_C_BCGP'                   : 39 , # K. Burke, A. Cancio, T. Gould, and S. Pittalis, ArXiv e-prints (2014), arXiv:1409.4834 [cond-mat.mtrl-sci]
-'GGA_C_Q2D'                    : 47 , # L. Chiodo, L. A. Constantin, E. Fabiano, and F. Della Sala, Phys. Rev. Lett. 108, 126402 (2012)
-'GGA_C_ZPBEINT'                : 61 , # L. A. Constantin, E. Fabiano, and F. Della Sala, Phys. Rev. B 84, 233103 (2011)
-'GGA_C_PBEINT'                 : 62 , # E. Fabiano, L. A. Constantin, and F. Della Sala, Phys. Rev. B 82, 113104 (2010)
-'GGA_C_ZPBESOL'                : 63 , # L. A. Constantin, E. Fabiano, and F. Della Sala, Phys. Rev. B 84, 233103 (2011)
+'GGA_C_PBE'                    : 130, # J. P. Perdew, K. Burke, and M. Ernzerhof, Phys. Rev. Lett. 77, 3865 (1996)
+'GGA_C_LYP'                    : 131, # C. Lee, W. Yang, and R. G. Parr, Phys. Rev. B 37, 785 (1988)
+'GGA_C_P86'                    : 132, # J. P. Perdew, Phys. Rev. B 33, 8822 (1986)
+'GGA_C_AM05'                   : 135, # R. Armiento and A. E. Mattsson, Phys. Rev. B 72, 085108 (2005)
+'GGA_C_SCAN_E0'                : 553, # J. Sun, A. Ruzsinszky, and J. P. Perdew, Phys. Rev. Lett. 115, 036402 (2015)
 }
 
 
-def get_init_uvec(xc_type='PBE0'):
+def get_init_uvec(xc_type='PBE0', dft_HF=None):
     '''Initialize uvec corresponding to each type of the DF-like cost function'''
+    if dft_HF is not None:
+        HF_percent = dft_HF
+    else:
+        HF_percent = 1.0
+
     if xc_type == 'PBE0':
-        uvec = [1.]  + [0.] * 2
-    elif xc_type == 'B3LYP':
-        uvec = [1.]  + [0.] * 4 
-    elif xc_type == 'CAMB3LYP':
-        uvec = [1. , .0000001, 1. , 0., 0., 0., 0.]  
-    elif xc_type == 'manyGGA':
-        uvec = [1.]  + [0.] * (len(GGA_X) + len(GGA_C)) 
+        uvec = [HF_percent]  + [0.] * 2
     elif xc_type == 'RSH-PBE0':
-        pass
+        uvec = [1.] + [1.]  + [0.] * 2 
+    elif xc_type == 'B3LYP':
+        uvec = [HF_percent]  + [0.] * 4 
+    elif xc_type == 'CAMB3LYP':
+        uvec = [HF_percent , .0000001, 1. , 0., 0., 0., 0.]  
+    elif xc_type == 'manyGGA':
+        uvec = [HF_percent]  + [0.] * (len(GGA_X) + len(GGA_C)) 
 
     return uvec
 
-def get_bounds(xc_type='PBE0', constraint=1):
+def get_bounds(xc_type='PBE0', constraint=1, dft_HF=None):
     '''Prodive the bounds to optimize the DF-like cost function'''
     
     if constraint == 1:
@@ -209,16 +214,16 @@ def get_bounds(xc_type='PBE0', constraint=1):
             lower = [-1.0] + [.0] * 2
             upper = [ 1.0] + [1.0] * 2
             bounds = optimize.Bounds(lower, upper)
+        elif xc_type == 'RSH-PBE0':
+            lower = [ -1.] * 2 + [.0] * 2
+            upper = [ 1.0] * 4
+            bounds = optimize.Bounds(lower, upper)
         elif xc_type == 'B3LYP':
             lower = [-1.0] + [.0] * 4
             upper = [ 1.0] + [1.0] * 4
             bounds = optimize.Bounds(lower, upper)
         elif xc_type == 'CAMB3LYP':
             bounds = optimize.Bounds([0.0,.0000001,.0,.0,.0,.0,.0], [1.,1.0,1.,1.,1.,1.,1.])
-        elif xc_type == 'RSH-PBE0':
-            lower = [-1.0] + [.0]
-            upper = [ 1.0] + [.1]
-            bounds = optimize.Bounds(lower, upper)
         elif xc_type == 'manyGGA':
             lower = [-1.0] + [.0] * (len(GGA_X) + len(GGA_C))
             upper = [ 1.0] + [.1] * (len(GGA_X) + len(GGA_C))
@@ -228,16 +233,15 @@ def get_bounds(xc_type='PBE0', constraint=1):
             lower = [-1.0] * 3
             upper = [ 1.0] * 3
             bounds = optimize.Bounds(lower, upper)
+        elif xc_type == 'RSH-PBE0':
+            lower = [-1] * 4
+            upper = [ 1.0]* 4
         elif xc_type == 'B3LYP':
             lower = [-1.0] * 5
             upper = [ 1.0] * 5
             bounds = optimize.Bounds(lower, upper)
         elif xc_type == 'CAMB3LYP':
             bounds = optimize.Bounds([0.0,.0000001,.0,.0,.0,.0,.0], [1.,1.0,1.,1.,1.,1.,1.])
-        elif xc_type == 'RSH-PBE0':
-            lower = [-1.0] * 2
-            upper = [ 1.0] * 2
-            bounds = optimize.Bounds(lower, upper)
         elif xc_type == 'manyGGA':
             lower = [-1.0] + [-1.0] * (len(GGA_X) + len(GGA_C))
             upper = [ 1.0] + [ 1.0] * (len(GGA_X) + len(GGA_C))
@@ -250,13 +254,16 @@ def get_bounds(xc_type='PBE0', constraint=1):
     return bounds
       
     
-def get_OEH_kpts(local, umat, xc_type='PBE0'):
+def get_OEH_kpts(local, umat, xc_type='PBE0', dft_HF=None):
     '''Construct the mf Hamiltonian'''
-    print(umat)
+    
+    if dft_HF is not None and xc_type is not 'RSH-PBE0':
+        umat[0] = np.float64(dft_HF)
+        
     if xc_type == 'PBE0':
         xc =  "{:.12f}*HF + {:.12f}*PBE, {:.12f}*PBE".format(*umat)
         n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
-        veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
+        veff = vxc + local.vj - umat[0] * 0.5 * local.vk
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo)
         
@@ -268,10 +275,12 @@ def get_OEH_kpts(local, umat, xc_type='PBE0'):
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
 
     elif xc_type == 'RSH-PBE0':
-        xc =  "{:.12f}*SR_HF({:.12f})+ {:.12f}*PBE, {:.12f}*PBE".format(*umat)
+        # TODO: right now the range-seperation parameter is fixed, it is super expensive to update it every cycle
+        # because the vk long-range needed to be generated 
+        umat = [local.xc_omega] + np.asarray(umat).tolist()
+        xc =  "{1:.12f}*SR_HF({0:.2f})+ {2:.12f}*LR_HF({0:.2f}) + {3:.12f}*PBE, {4:.12f}*PBE".format(*umat)
         n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
-        vklr = - a * local.vklr
-        veff = vxc + local.vj - 0.5 * (umat[0] * local.vk + vklr)
+        veff = vxc + local.vj - 0.5 * (umat[1]*local.vksr + umat[2]*local.vklr)
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo)
         
@@ -292,6 +301,8 @@ def get_OEH_kpts(local, umat, xc_type='PBE0'):
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
         
+    print("xc", xc)
+    
     return OEH_kpts
     
     
