@@ -300,8 +300,6 @@ def get_OEH_kpts(local, umat, xc_type='PBE0', dft_HF=None):
         veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
-        
-    print("xc", xc)
     
     return OEH_kpts
     

@@ -449,7 +449,7 @@ class pDMET:
             nline = nimpOrbs // 10
             last_line = nimpOrbs - 10 * nline
             for line in range(nline):
-                tprint.print_msg(("      " + "{} "*10).fortmat(*impOrbs_idx[10*line:10*(line+1)]))
+                tprint.print_msg(("      " + "{} "*10).format(*impOrbs_idx[10*line:10*(line+1)]))
             tprint.print_msg(("      " + "{} "*last_line).format(*impOrbs_idx[-last_line:]))
             
         if self.dft_CF: tprint.print_msg("  DF-like cost function:", self.xc)          
@@ -476,8 +476,8 @@ class pDMET:
             if self.dft_CF:
                 result = optimize.minimize(self.CF, self.uvec, method='L-BFGS-B', jac=None, options={'disp': False, 'gtol': 1e-4, 'eps': 1e-8}, bounds=self.bounds)
             else:
-                result = optimize.minimize(self.CF, self.uvec, method=self.SC_method, jac=self.CF_grad, options={'disp': False, 'gtol': 1e-12})
-                # result = optimize.minimize(self.CF, self.uvec, method = self.SC_method , options = {'disp': False, 'gtol': 1e-12})
+                # result = optimize.minimize(self.CF, self.uvec, method=self.SC_method, jac=self.CF_grad, options={'disp': False, 'gtol': 1e-12})
+                result = optimize.minimize(self.CF, self.uvec, method = self.SC_method , options = {'disp': False, 'gtol': 1e-12})
                 
             if not result.success:         
                 tprint.print_msg("     WARNING: Correlation potential is not converged")    
@@ -616,7 +616,7 @@ class pDMET:
         
         nelec_per_cell_from_embedding = self.kernel(chempot)
         self._is_new_bath = False
-        print ("     Cycle %2d. Chem potential: %12.8f | Elec/cell = %12.8f | <S^2> = %12.8f" % \
+        tprint.print_msg("     Cycle %2d. Chem potential: %12.8f | Elec/cell = %12.8f | <S^2> = %12.8f" % \
                                                         (self._cycle, chempot, nelec_per_cell_from_embedding, self.qcsolver.SS))                                                                               
         self._cycle += 1
         return nelec_per_cell_from_embedding - self.Nelec_per_cell
@@ -680,6 +680,7 @@ class pDMET:
         '''
         
         RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec)
+        print("RDM_deriv_kpts", RDM_deriv_kpts.imag.max())
         the_gradient = []    
         for u in range(self.Nterms):
             RDM_deriv_R0 = self.local.k_to_R0(RDM_deriv_kpts[:,u,:,:])    # Transform RDM_deriv from k-space to the reference cell         
@@ -689,7 +690,7 @@ class pDMET:
                 emb_error_deriv = self.local.loc_kpts_to_emb(RDM_deriv_kpts[:,u,:,:], self.emb_orbs) 
             if self.SC_CFtype in ['diagF', 'diagFB']: emb_error_deriv = np.diag(emb_error_deriv)
             the_gradient.append(emb_error_deriv)
-        
+        print("rdm_diff_grad", np.asarray(the_gradient).imag.max())
         return np.asarray(the_gradient)       
 
     def glob_cost_func(self, uvec):
@@ -756,7 +757,7 @@ class pDMET:
             OEH = self.local.k_to_R(OEH)
             e_fun = np.trace(OEH.dot(loc_1RDM_R0))
         else: 
-            print('Other type of 1e electron is not supported')
+            tprint.print_msg('Other type of 1e electron is not supported')
           
         rdm_diff = self.glob_rdm_diff(uvec)[0]  
         e_cstr = np.sum(umat_Rs*rdm_diff)  
@@ -912,6 +913,7 @@ class pDMET:
         Norb = loc_actFOCK_kpts.shape[-1]
         for kpt in range(self.Nkpts):
             rdm_deriv = libdmet.rhf_response_c(Norb, self.Nterms, self.numPairs, self.H1start, self.H1row, self.H1col, loc_actFOCK_kpts[kpt])
+            print("DEBUG", rdm_deriv.imag.max())
             rdm_deriv_kpts.append(rdm_deriv)
             
         return np.asarray(rdm_deriv_kpts) 
