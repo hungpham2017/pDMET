@@ -61,6 +61,7 @@ def make_imp_orbs(cell, w90, impCluster, threshold=0.5):
     # Check the distance between MLWFs and the imp atoms
     tmp = np.repeat(MLWFs_coors[:,np.newaxis,:], impAtoms.shape[0], axis=1)
     distance = np.sqrt(np.sum((tmp - impAtoms)**2, axis=2)).min(axis=1)
+    
     impOrbs = np.zeros(cell.nao, dtype=int)
     impOrbs[distance < threshold] = 1
     

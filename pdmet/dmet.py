@@ -68,8 +68,12 @@ class pDMET:
         assert solver in solver_list, "Solver options: HF, CASCI, CASSCF, DMRG-CI, DMRG-SCF, FCI, DMRG, RCCSD, SHCI"
         self.solver   = solver        
         self.e_shift  = None         # Use to fix spin of the wrong state with FCI, hence CASCI/CASSCF solver
-        self.impCluster = None
         self.use_GDF  = True          # Mostly using for FFTDF where density fitting is not available
+        
+        # Gamma sampling embedding
+        self.impCluster = None
+        self._impOrbs_threshold = 0.5
+
 
         # Parameters    
         self.SC_method          = "BFGS"        # BFGS, CG, Newton-CG
@@ -173,7 +177,7 @@ class pDMET:
 
         if self.impCluster is not None:
             assert np.prod(self.kmesh) == 1, "impCluster is used only for a Gamma-point sampling calculation"
-            self._impOrbs = misc.make_imp_orbs(self.cell, self.w90, self.impCluster)
+            self._impOrbs = misc.make_imp_orbs(self.cell, self.w90, self.impCluster, threshold=self._impOrbs_threshold)
             self.Nimp = np.sum(self._impOrbs)
             assert self.Nimp <= self.Norbs//2, "Fragment needs to be smaller than the environment"
             self._is_gamma = True
