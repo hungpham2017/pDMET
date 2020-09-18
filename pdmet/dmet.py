@@ -157,6 +157,32 @@ class pDMET:
         else:
             self.dft_CF = False
 
+        # For the Gamma-sampling DMET
+        if self.impCluster is not None:
+            assert np.prod(self.kmesh) == 1, "impCluster is used only for a Gamma-point sampling calculation"
+            self._impOrbs, self._impAtms = misc.make_imp_orbs(self.cell, self.w90, self.impCluster, threshold=self._impOrbs_threshold)
+            self.Nimp = np.sum(self._impOrbs)
+            self._is_gamma = True
+            
+            tprint.print_msg("==== Impurity cluster ====")
+            tprint.print_msg(" No. of Impurity atoms   : {0}".format(len(self.impCluster)))
+            tprint.print_msg(" No. of Impurity orbitals: {0}".format(self.Nimp))
+            atom_coords = self.cell.atom_coords() * lib.param.BOHR
+            for i, atm in enumerate(self.impCluster):
+                symbol = self.cell.atom_symbol(atm - 1)
+                x, y, z = atom_coords[atm - 1]
+                tprint.print_msg("  {0:3d}  {1:3s}  {2:3.5f} {3:3.5f} {4:3.5f}".format(atm, symbol, x, y, z))
+                impAtms = self._impAtms[i].tolist()
+                nimpOrbs = len(impAtms)
+                impAtms = [nimpOrbs] + impAtms
+                tprint.print_msg(("       {:d} Orbitals: " + "{:d} "*nimpOrbs).format(*impAtms))
+
+            tprint.print_msg("==========================")
+        else:
+            self.Nimp = self.local.nlo     # the whole reference unit cell is the imputity
+            self._is_gamma = False
+
+        # Initilize the local space object
         self.local = localbasis.Local(self.cell, self.kmf, self.w90, self.xc_omega)  
         self.e_core = self.local.e_core   
         
@@ -173,18 +199,6 @@ class pDMET:
         self.Nelec_total    = self.local.nelec_total
         self.Nelec_per_cell = self.local.nelec_per_cell
         self.numPairs = self.Nelec_per_cell // 2 
-        
-
-        if self.impCluster is not None:
-            assert np.prod(self.kmesh) == 1, "impCluster is used only for a Gamma-point sampling calculation"
-            self._impOrbs = misc.make_imp_orbs(self.cell, self.w90, self.impCluster, threshold=self._impOrbs_threshold)
-            self.Nimp = np.sum(self._impOrbs)
-            assert self.Nimp <= self.Norbs//2, "Fragment needs to be smaller than the environment"
-            self._is_gamma = True
-            
-        else:
-            self.Nimp = self.local.nlo     # the whole reference unit cell is the imputity
-            self._is_gamma = False
         
         if self.SC_CFtype in ['diagF', 'diagFB']: 
             self.Nterms = self.Nimp 
@@ -438,23 +452,23 @@ class pDMET:
         tprint.print_msg("  Fitting 1-RDM of :", self.SC_CFtype) 
         
         # Print the impurity cluster in case of the Gamma sampling
-        if self._is_gamma:
-            tprint.print_msg("  Impurity cluster")
-            tprint.print_msg("    Impurity atoms: {0}".format(len(self.impCluster)))
-            atom_coords = self.cell.atom_coords() * lib.param.BOHR
-            for atm in self.impCluster:
-                symbol = self.cell.atom_symbol(atm - 1)
-                x, y, z = atom_coords[atm - 1]
-                tprint.print_msg("      {0}  {1}  {2:3.5f} {3:3.5f} {4:3.5f}".format(atm, symbol, x, y, z))
+        # if self._is_gamma:
+            # tprint.print_msg("  Impurity cluster")
+            # tprint.print_msg("    Impurity atoms: {0}".format(len(self.impCluster)))
+            # atom_coords = self.cell.atom_coords() * lib.param.BOHR
+            # for atm in self.impCluster:
+                # symbol = self.cell.atom_symbol(atm - 1)
+                # x, y, z = atom_coords[atm - 1]
+                # tprint.print_msg("      {0}  {1}  {2:3.5f} {3:3.5f} {4:3.5f}".format(atm, symbol, x, y, z))
              
-            tprint.print_msg("    Impurity orbitals: {0}".format(self.Nimp))
-            impOrbs_idx = np.arange(self.Norbs)[self._impOrbs == 1]
-            nimpOrbs = impOrbs_idx.shape[0]
-            nline = nimpOrbs // 10
-            last_line = nimpOrbs - 10 * nline
-            for line in range(nline):
-                tprint.print_msg(("      " + "{} "*10).format(*impOrbs_idx[10*line:10*(line+1)]))
-            tprint.print_msg(("      " + "{} "*last_line).format(*impOrbs_idx[-last_line:]))
+            # tprint.print_msg("    Impurity orbitals: {0}".format(self.Nimp))
+            # impOrbs_idx = np.arange(self.Norbs)[self._impOrbs == 1]
+            # nimpOrbs = impOrbs_idx.shape[0]
+            # nline = nimpOrbs // 10
+            # last_line = nimpOrbs - 10 * nline
+            # for line in range(nline):
+                # tprint.print_msg(("      " + "{} "*10).format(*impOrbs_idx[10*line:10*(line+1)]))
+            # tprint.print_msg(("      " + "{} "*last_line).format(*impOrbs_idx[-last_line:]))
             
         if self.dft_CF: tprint.print_msg("  DF-like cost function:", self.xc)          
         if self.damping != 1.0:        

@@ -60,10 +60,21 @@ def make_imp_orbs(cell, w90, impCluster, threshold=0.5):
     
     # Check the distance between MLWFs and the imp atoms
     tmp = np.repeat(MLWFs_coors[:,np.newaxis,:], impAtoms.shape[0], axis=1)
-    distance = np.sqrt(np.sum((tmp - impAtoms)**2, axis=2)).min(axis=1)
-    
+    distance = np.sqrt(np.sum((tmp - impAtoms)**2, axis=2))
+    min_distance = distance.min(axis=1)
+    min_distance_idx = np.argmin(distance, axis=1)  
+
+    # Label by 1 only the impurity orbitals
     impOrbs = np.zeros(cell.nao, dtype=int)
-    impOrbs[distance < threshold] = 1
+    impOrbs[min_distance < threshold] = 1
     
-    return impOrbs
+    # Group the impurity orbitals by their corresponding atoms
+    Norbs = MLWFs_coors.shape[0]
+    impOrbs_idx = np.arange(Norbs)[impOrbs == 1]
+    atom_idx = min_distance_idx[min_distance < threshold]
+    impAtms = []
+    for i, atm in enumerate(impCluster):
+        impAtms.append(impOrbs_idx[atom_idx == i])
+    
+    return impOrbs, impAtms
     
