@@ -54,6 +54,7 @@ def make_imp_orbs(cell, w90, impCluster, threshold=0.5):
     impAtoms = abs_coors[impCluster - 1]
     
     # Make sure all the MLWFs inside the unit cell
+    num_wann = w90.wann_centres.shape[0]
     MLWFs_coors = w90.wann_centres
     MLWFs_frac_coors = MLWFs_coors @ inv_lattice
     MLWFs_coors = put_atoms_in_unitcell(MLWFs_frac_coors) @ lattice
@@ -65,7 +66,7 @@ def make_imp_orbs(cell, w90, impCluster, threshold=0.5):
     min_distance_idx = np.argmin(distance, axis=1)  
 
     # Label by 1 only the impurity orbitals
-    impOrbs = np.zeros(cell.nao, dtype=int)
+    impOrbs = np.zeros(num_wann, dtype=int)
     impOrbs[min_distance < threshold] = 1
     
     # Group the impurity orbitals by their corresponding atoms

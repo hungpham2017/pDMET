@@ -435,7 +435,13 @@ class pDMET:
             self.chempot = optimize.newton(self.nelec_cost_func, self.chempot)
             tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_per_cell))
             
-        tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))                          
+        if self.nroots > 1:
+            tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot[0]))    
+            for i, e in enumerate(self.e_tot):
+                tprint.print_msg("      Root %d: E = %12.8f" % (i, e))  
+        else:
+            tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))    
+        
         tprint.print_msg("-- One-shot DMET ... finished at %s" % (tunix.current_time()))
         tprint.print_msg()            
         
@@ -444,41 +450,21 @@ class pDMET:
         Do self-consistent pDMET
         '''    
            
-         
         tprint.print_msg("--------------------------------------------------------------------")
         tprint.print_msg("- SELF-CONSISTENT DMET CALCULATION ... STARTING -")
         tprint.print_msg("  Convergence criteria")   
         tprint.print_msg("    Threshold :", self.SC_threshold)     
         tprint.print_msg("  Fitting 1-RDM of :", self.SC_CFtype) 
-        
-        # Print the impurity cluster in case of the Gamma sampling
-        # if self._is_gamma:
-            # tprint.print_msg("  Impurity cluster")
-            # tprint.print_msg("    Impurity atoms: {0}".format(len(self.impCluster)))
-            # atom_coords = self.cell.atom_coords() * lib.param.BOHR
-            # for atm in self.impCluster:
-                # symbol = self.cell.atom_symbol(atm - 1)
-                # x, y, z = atom_coords[atm - 1]
-                # tprint.print_msg("      {0}  {1}  {2:3.5f} {3:3.5f} {4:3.5f}".format(atm, symbol, x, y, z))
-             
-            # tprint.print_msg("    Impurity orbitals: {0}".format(self.Nimp))
-            # impOrbs_idx = np.arange(self.Norbs)[self._impOrbs == 1]
-            # nimpOrbs = impOrbs_idx.shape[0]
-            # nline = nimpOrbs // 10
-            # last_line = nimpOrbs - 10 * nline
-            # for line in range(nline):
-                # tprint.print_msg(("      " + "{} "*10).format(*impOrbs_idx[10*line:10*(line+1)]))
-            # tprint.print_msg(("      " + "{} "*last_line).format(*impOrbs_idx[-last_line:]))
             
         if self.dft_CF: tprint.print_msg("  DF-like cost function:", self.xc)          
         if self.damping != 1.0:        
             tprint.print_msg("  Damping factor   :", self.damping)                
         if self.DIIS:
-            tprint.print_msg("  DIIS start at %dth cycle and using %d previous umats" % (self.DIIS_m, self.DIIS_n))            
+            tprint.print_msg("  DIIS start at %dth cycle and using %d previous umats" % (self.DIIS_m, self.DIIS_n))  
+            
         #------------------------------------#
         #---- SELF-CONSISTENT PROCEDURE ----#      
         #------------------------------------#    
-        
         OEH_kpts, rdm1_kpts, rdm1_R0 = self.local.make_loc_1RDM(self.umat, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
         for cycle in range(self.SC_maxcycle):
             
@@ -502,8 +488,6 @@ class pDMET:
                   
             uvec = result.x
             self.umat = self.uvec2umat(uvec)   
-            
-            #rdm1_kpts, rdm1_R0 = self.local.make_loc_1RDM(self.umat, self.OEH_type) 
             
             # Construct new global 1RDM in k-space
             global_corr_1RDM = self.local.get_1RDM_Rs(self.loc_corr_1RDM_R0)

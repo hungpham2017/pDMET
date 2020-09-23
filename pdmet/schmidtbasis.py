@@ -47,15 +47,14 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
         Nimp = np.int32(imp_indices.sum())
         Nenv = Nlo - Nimp
         emb_1RDM = supercell_1RDM[0][env_frag_mask].reshape(Nenv, Nimp) 
-       
+    
     U, sigma, Vh = np.linalg.svd(emb_1RDM, full_matrices=True)
     distance_from_1 = np.abs(np.sqrt(np.abs(1-sigma**2)))
-    
     idx = (distance_from_1).argsort()
     distance_from_1 = distance_from_1[idx]
     sigma = sigma[idx]
     U[:,:Nimp] = U[:,:Nimp][:,idx]
-    V = Vh.T[:,idx]
+    V = Vh.T#[:,idx]
     
     # Eliminate unentangled bath using a threshold:
     Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()

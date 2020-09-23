@@ -146,7 +146,7 @@ class QCsolvers:
         else:         
             ImpurityEnergy_a = 0.5*lib.einsum('ij,ij->', RDM1[0][:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
                             + 0.5*lib.einsum('ij,ij->', RDM1[0][:Nimp,:], JK[0][:Nimp,:])        
-            ImpurityEnergy_b = 0.5*lib.einsum('ij,ij->', RDM1[13][:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+            ImpurityEnergy_b = 0.5*lib.einsum('ij,ij->', RDM1[1][:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
                             + 0.5*lib.einsum('ij,ij->', RDM1[1][:Nimp,:], JK[1][:Nimp,:])
             ImpurityEnergy =  ImpurityEnergy_a + ImpurityEnergy_b     
             RDM1 = RDM1.sum(axis=0)
@@ -389,7 +389,7 @@ class QCsolvers:
             self.fs = fci.addons.fix_spin_(fci.FCI(self.mf, self.mf.mo_coeff), self.e_shift)
             
         self.fs.verbose = self.verbose
-        self.fs.fs_conv_tol       = self.fs_conv_tol  
+        self.fs.conv_tol       = self.fs_conv_tol  
         self.fs.conv_tol_residual = self.fs_conv_tol_residual             
         self.fs.nroots = self.nroots 
         if self.ci is not None: 
@@ -398,10 +398,10 @@ class QCsolvers:
             ci0 = None
         EFCI, fcivec = self.fs.kernel(ci0=ci0)         
         self.ci = fcivec
-        
+
         # Compute energy and RDM1      
         if self.nroots == 1:
-            if self.fs.converged == False: print('           WARNING: The solver is not converged')
+            if not  self.fs.converged: print('           WARNING: The solver is not converged')
             self.SS = self.fs.spin_square(fcivec, self.Norb, self.mol.nelec)[0]
             RDM1_mo , RDM2_mo = self.fs.make_rdm12(fcivec, self.Norb, self.mol.nelec)
             # Transform RDM1 , RDM2 to local basis
@@ -419,7 +419,7 @@ class QCsolvers:
                        + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
             e_cell = self.kmf_ecore + ImpurityEnergy         
         else:
-            if self.fs.converged.any() == False: print('           WARNING: The solver is not converged')
+            if not self.fs.converged.any(): print('           WARNING: The solver is not converged')
             tot_SS = 0 
             RDM1 = []  
             e_cell = []           
@@ -439,7 +439,7 @@ class QCsolvers:
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
                 Imp_e = self.kmf_ecore + Imp_Energy_state               
-                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, e[i], Imp_e, SS))                 
+                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, EFCI[i], Imp_e, SS))                 
                 tot_SS += SS                              
                 RDM1.append(rdm1) 
                 e_cell.append(Imp_e)              
