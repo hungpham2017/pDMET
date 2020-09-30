@@ -334,10 +334,7 @@ class pDMET:
                     lo2core = self.local.get_lo2core(self.core_orbs)
                     core_OEI = self.local.get_core_OEI(ao2core)
                     Nelec_in_core = self.Nelec_total - self.Nelec_in_emb
-                    
-                    #TODO: loc_OEH_kpts is removed from the kernel, so this part needed to be modified
                     core_1RDM = self.local.get_core_mf_1RDM(lo2core, Nelec_in_core, self.loc_OEH_kpts)
-                    
                     loc_core_1RDM = lib.einsum('kim,mn,kjn->kij', lo2core, core_1RDM, lo2core.conj())
                     core_JK = self.local.get_core_JK(ao2core, loc_core_1RDM)
                     core_energy = np.sum((core_OEI + 0.5 * core_JK)* core_1RDM)
@@ -351,6 +348,8 @@ class pDMET:
             self.loc_corr_1RDM_R0 += self.loc_core_1RDM
             self.nelec_per_cell = self.Nelec_total
             self.e_tot = e_solver + self.core_energy + self.local.e_core
+            self.e_emb = e_solver 
+            self.e_imp = e_cell - self.local.e_core   
         else:
             self.nelec_per_cell = np.trace(RDM1[:self.Nimp,:self.Nimp])
             self.e_tot = e_cell   
@@ -431,6 +430,11 @@ class pDMET:
         # Optimize the chemical potential
         if self._is_gamma:
             nelec_per_cell_from_embedding = self.kernel(chempot=0.0)
+            tprint.print_msg("   Energy decomposition:")
+            tprint.print_msg("     Impurity                : %12.8f" % (self.e_imp))
+            tprint.print_msg("     Bath                    : %12.8f" % (self.e_emb - self.e_imp))
+            tprint.print_msg("     Environment             : %12.8f" % (self.core_energy))
+            tprint.print_msg("     Nuc + Frozen            : %12.8f" % (self.local.e_core))
         else:
             self.chempot = optimize.newton(self.nelec_cost_func, self.chempot)
             tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_per_cell))

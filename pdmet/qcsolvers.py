@@ -153,7 +153,6 @@ class QCsolvers:
                 
         # Compute total energy        
         e_cell = self.kmf_ecore + ImpurityEnergy  
-        
         return (e_cell, ERHF, RDM1) 
         
 ##################################

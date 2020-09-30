@@ -84,7 +84,7 @@ class Local:
         coreJK_kpts = kmf.get_veff(cell, self.coreDM_kpts, hermi = 1, kpts = self.kpts, kpts_band = None)
 
         # Core energy from the frozen orbitals
-        self.e_core = cell.energy_nuc() + 1./self.Nkpts *lib.einsum('kij,kji->', full_OEI_k + 0.5*coreJK_kpts, self.coreDM_kpts).real        
+        self.e_core = cell.energy_nuc() + 1./self.Nkpts *lib.einsum('kij,kji->', full_OEI_k + 0.5*coreJK_kpts, self.coreDM_kpts).real
                
         # 1e integral for the active part
         self.actOEI_kpts = full_OEI_k + coreJK_kpts     
