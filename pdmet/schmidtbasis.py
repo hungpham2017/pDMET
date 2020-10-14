@@ -22,7 +22,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 import numpy as np
        
             
-def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
+def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, num_bath=None, threshold=1.e-10):
     '''
     Construct the RHF bath using the 1RDM for reference unit cell
     ref: 
@@ -58,6 +58,7 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, threshold=1.e-10):
     
     # Eliminate unentangled bath using a threshold:
     Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()
+    if num_bath is not None: Nbath = num_bath
     if Nbath == 0: Nbath = Nimp         # Avoid zero bath situation
 
     # Assemble the embedding + core orbitals

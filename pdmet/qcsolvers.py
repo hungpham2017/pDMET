@@ -180,25 +180,27 @@ class QCsolvers:
         # Modify CC object using the correct mol, mf objects
         self.cc.mol  = self.mol         
         self.cc._scf = self.mf 
-        self.cc._scf = self.mf
         self.cc.mo_coeff = self.mf.mo_coeff
-        self.cc.mo_occ = self.mf.mo_occ        
+        self.cc.mo_occ = self.mf.mo_occ
+        self.cc._nocc = self.Nel//2
+        self.cc._nmo = self.Norb
         self.cc.chkfile = self.mf.chkfile
         
         # Run RCCSD and get RDMs    
-        if self.t1 is not None and self.t2 is not None:
+        if self.t1 is not None and self.t1.shape[0] == self.cc._nocc:            
             t1_0 = self.t1
             t2_0 = self.t2
         else:
-            t1_0 = self.t1
-            t2_0 = self.t2
+            t1_0 = None
+            t2_0 = None
+                       
         Ecorr, t1, t2 = self.cc.kernel(t1=t1_0, t2=t2_0)
         ECCSD = Ecorr + self.mf.e_tot
         self.t1 = t1
         self.t2 = t2
-        if self.cc.converged == False: print('           WARNING: The solver is not converged')        
-        RDM1_mo = self.cc.make_rdm1()
-        RDM2_mo = self.cc.make_rdm2()  
+        if not self.cc.converged: print('           WARNING: The solver is not converged')        
+        RDM1_mo = self.cc.make_rdm1(t1=t1, t2=t2)
+        RDM2_mo = self.cc.make_rdm2(t1=t1, t2=t2)  
 
         # Transform RDM1 , RDM2 to local basis
         RDM1 = lib.einsum('ap,pq->aq', self.mf.mo_coeff, RDM1_mo)

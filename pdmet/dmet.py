@@ -4,7 +4,7 @@ pDMET: Density Matrix Embedding theory for Periodic Systems
 Copyright (C) 2018 Hung Q. Pham. All Rights Reserved.
 A few functions in pDMET are modifed from QC-DMET Copyright (C) 2015 Sebastian Wouters
 
-Licensed under the Apache License, Version 2.0 (tnkptshe "License");
+Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
@@ -41,7 +41,7 @@ class pDMET:
             w90                                : a converged wannier90 object
             OEH_type                        : One-electron Hamiltonian used in the bath construction, h(k) = OEH(k) + umat(k) 
             SCmethod                        : 'BFGS'/'CG'/'Newton-CG' self-consistent iteration method, defaut: BFGS
-            SC_threshold                    : convergence criteria for correlation potential, default: 1e-6
+            SC_threshold                    : convergence criteria for correlatiself.e_toton potential, default: 1e-6
             SC_maxcycle                     : maximum cycle for self-consistent iteration, default: 50
             umat                            : correlation potential
             chempot                         : global chemical potential
@@ -73,11 +73,12 @@ class pDMET:
         # Gamma sampling embedding
         self.impCluster = None
         self._impOrbs_threshold = 0.5
-
+        self._impOrbs_rmlist = None
+        self._num_bath = None
 
         # Parameters    
         self.SC_method          = "BFGS"        # BFGS, CG, Newton-CG
-        self.SC_threshold       = 1e-5            
+        self.SC_threshold       = 1e-4            
         self.SC_maxcycle        = 200
         self.SC_CFtype          = "F" # Options: ['F','diagF', 'FB','diagFB']
         self.alt_CF             = False 
@@ -106,8 +107,8 @@ class pDMET:
         self.emb_corr_1RDM      = None  
         self.emb_orbs           = None
         self.emb_mf_1RDM        = None
-        self.e_tot              = None       # energy per unit cell     
-        self.e_corr             = None
+        self.e_tot              = 0.       # energy per unit cell     
+        self.e_corr             = 0.
         self.nelec_per_cell     = None      
         
         # Others
@@ -160,7 +161,7 @@ class pDMET:
         # For the Gamma-sampling DMET
         if self.impCluster is not None:
             assert np.prod(self.kmesh) == 1, "impCluster is used only for a Gamma-point sampling calculation"
-            self._impOrbs, self._impAtms = misc.make_imp_orbs(self.cell, self.w90, self.impCluster, threshold=self._impOrbs_threshold)
+            self._impOrbs, self._impAtms = misc.make_imp_orbs(self.cell, self.w90, self.impCluster, threshold=self._impOrbs_threshold, rm_list=self._impOrbs_rmlist)
             self.Nimp = np.sum(self._impOrbs)
             self._is_gamma = True
             
@@ -211,7 +212,6 @@ class pDMET:
                   
         self.chempot = 0.0
         if self.dft_CF:
-            
             self.uvec = df_hamiltonian.get_init_uvec(self.xc, self.dft_HF)
             self.bounds = df_hamiltonian.get_bounds(self.xc, self.dft_CF_constraint, self.dft_HF)           
         else:
@@ -358,7 +358,9 @@ class pDMET:
         
     def bath_contruction(self, loc_1RDM_R0, impCluster):
         '''Get the bath orbitals'''
-        emb_orbs, core_orbs, Nbath = get_bath_using_RHF_1RDM(loc_1RDM_R0, impCluster)
+        emb_orbs, core_orbs, Nbath = get_bath_using_RHF_1RDM(loc_1RDM_R0, impCluster, self._num_bath)
+        # self._num_bath is used to keep the no. of baths are the same as in the 1st cycle of SCF
+        if self._num_bath is None: self._num_bath = Nbath           
         Nemb = self.Nimp + Nbath
         emb_orbs = emb_orbs.reshape(self.Nkpts, self.local.nlo, Nemb) # NR = Nkpts
         core_orbs = core_orbs.reshape(self.Nkpts, self.local.nlo, self.local.nlo - Nemb)
@@ -474,7 +476,8 @@ class pDMET:
             
             tprint.print_msg("- CYCLE %d:" % (cycle + 1))    
             umat_old = self.umat      
-            rdm1_R0_old = rdm1_R0          
+            rdm1_R0_old = rdm1_R0     
+            energy_old = self.e_tot
             
             # Do one-shot with each uvec                  
             self.one_shot(umat=self.umat) 
@@ -485,7 +488,7 @@ class pDMET:
                 result = optimize.minimize(self.CF, self.uvec, method='L-BFGS-B', jac=None, options={'disp': False, 'gtol': 1e-4, 'eps': 1e-8}, bounds=self.bounds)
             else:
                 # result = optimize.minimize(self.CF, self.uvec, method=self.SC_method, jac=self.CF_grad, options={'disp': False, 'gtol': 1e-12})
-                result = optimize.minimize(self.CF, self.uvec, method = self.SC_method , options = {'disp': False, 'gtol': 1e-12})
+                result = optimize.minimize(self.CF, self.uvec, method = self.SC_method , options = {'disp': False, 'gtol': 1e-6}, tol=1e-4)
                 
             if not result.success:         
                 tprint.print_msg("     WARNING: Correlation potential is not converged")    
@@ -510,13 +513,15 @@ class pDMET:
                 tprint.print_msg("   + Correlation potential vector    : ", uvec)
                     
             umat_diff = umat_old - self.umat  
-            rdm_diff  = rdm1_R0_old - rdm1_R0           
+            rdm_diff  = rdm1_R0_old - rdm1_R0  
+            energy_diff = self.e_tot - energy_old
             norm_u    = np.linalg.norm(umat_diff)             
             norm_rdm  = np.linalg.norm(rdm_diff) 
             
             tprint.print_msg("   + Cost function             : %20.15f" % (result.fun))
             tprint.print_msg("   + 2-norm of umat difference : %20.15f" % (norm_u)) 
             tprint.print_msg("   + 2-norm of rdm1 difference : %20.15f" % (norm_rdm))  
+            tprint.print_msg("   + Energy difference         : %20.15f" % (energy_diff))  
             
             # Export band structure at every cycle:
             if get_band:
@@ -686,7 +691,6 @@ class pDMET:
         '''
         
         RDM_deriv_kpts = self.construct_1RDM_response_kpts(uvec)
-        print("RDM_deriv_kpts", RDM_deriv_kpts.imag.max())
         the_gradient = []    
         for u in range(self.Nterms):
             RDM_deriv_R0 = self.local.k_to_R0(RDM_deriv_kpts[:,u,:,:])    # Transform RDM_deriv from k-space to the reference cell         
@@ -696,7 +700,7 @@ class pDMET:
                 emb_error_deriv = self.local.loc_kpts_to_emb(RDM_deriv_kpts[:,u,:,:], self.emb_orbs) 
             if self.SC_CFtype in ['diagF', 'diagFB']: emb_error_deriv = np.diag(emb_error_deriv)
             the_gradient.append(emb_error_deriv)
-        print("rdm_diff_grad", np.asarray(the_gradient).imag.max())
+
         return np.asarray(the_gradient)       
 
     def glob_cost_func(self, uvec):
@@ -918,8 +922,9 @@ class pDMET:
         loc_actFOCK_kpts = self.local.loc_actFOCK_kpts + self.uvec2umat(uvec)
         Norb = loc_actFOCK_kpts.shape[-1]
         for kpt in range(self.Nkpts):
-            rdm_deriv = libdmet.rhf_response_c(Norb, self.Nterms, self.numPairs, self.H1start, self.H1row, self.H1col, loc_actFOCK_kpts[kpt])
-            print("DEBUG", rdm_deriv.imag.max())
+            #rdm_deriv = libdmet.rhf_response_c(Norb, self.Nterms, self.numPairs, self.H1start, self.H1row, self.H1col, loc_actFOCK_kpts[kpt])
+            rdm_deriv = libdmet.rhf_response(Norb, self.Nterms, self.numPairs, self.H1start, self.H1row, self.H1col, loc_actFOCK_kpts[kpt].real)
+            rdm_deriv = np.complex128(rdm_deriv)
             rdm_deriv_kpts.append(rdm_deriv)
             
         return np.asarray(rdm_deriv_kpts) 
