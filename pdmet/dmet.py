@@ -64,7 +64,7 @@ class pDMET:
         self.OEH_type = 'FOCK' # Options: FOCK/OEI        
         
         # QC Solver    
-        solver_list   = ['HF', 'CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF', 'FCI', 'DMRG', 'RCCSD', 'SHCI']
+        solver_list   = ['HF', 'CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF', 'FCI', 'DMRG', 'RCCSD', 'RCCSD_T', 'SHCI']
         assert solver in solver_list, "Solver options: HF, CASCI, CASSCF, DMRG-CI, DMRG-SCF, FCI, DMRG, RCCSD, SHCI"
         self.solver   = solver        
         self.e_shift  = None         # Use to fix spin of the wrong state with FCI, hence CASCI/CASSCF solver
@@ -316,6 +316,8 @@ class pDMET:
             e_cell, e_solver, RDM1 = self.qcsolver.DMRG()          
         elif self.solver == 'RCCSD':
             e_cell, e_solver, RDM1 = self.qcsolver.RCCSD()  
+        elif self.solver == 'RCCSD_T':
+            e_cell, e_solver, RDM1 = self.qcsolver.RCCSD_T()              
         elif self.solver == 'SHCI':
             e_cell, e_solver, RDM1 = self.qcsolver.SHCI()              
         

@@ -25,6 +25,8 @@ from functools import reduce
 import PyCheMPS2
 import pyscf
 from pyscf import lib, gto, ao2mo, scf, cc, fci, mcscf
+from pyscf.cc import ccsd_t_lambda_slow as ccsd_t_lambda
+from pyscf.cc import ccsd_t_rdm_slow as ccsd_t_rdm
 # from pyscf import dmrgscf 
 # from pyscf.shciscf import shci 
 
@@ -97,6 +99,11 @@ class QCsolvers:
             self.cc = cc.CCSD(self.mf)
             self.t1 = None
             self.t2 = None
+        elif self.solver == 'RCCSD_T': 
+            self.cc = cc.CCSD(self.mf)
+            self.t1 = None
+            self.t2 = None
+            self.verbose = verbose
          
     def initialize(self, kmf_ecore, OEI, TEI, JK, DMguess, Norb, Nel, Nimp, chempot=0.0):
         self.kmf_ecore      = kmf_ecore       
@@ -222,6 +229,80 @@ class QCsolvers:
 
         return (e_cell, ECCSD, RDM1)            
 
+
+##################################
+########## RCCSD(T) solver ########## 
+##################################           
+    def RCCSD_T(self):
+        '''
+        Couple-cluster Single-Double (T) 
+        '''        
+
+        Nimp = self.Nimp
+        FOCKcopy = self.FOCK.copy() - self.chempot
+                
+        self.mol.nelectron = self.Nel
+        self.mf.__init__(self.mol)
+        self.mf.get_hcore = lambda *args: FOCKcopy
+        self.mf.get_ovlp = lambda *args: np.eye(self.Norb)
+        self.mf._eri = ao2mo.restore(8, self.TEI, self.Norb)
+        self.mf.scf(self.DMguess)       
+        DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+        if (self.mf.converged == False):
+            self.mf.newton().kernel(dm0=DMloc)
+            DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+
+        # Modify CC object using the correct mol, mf objects
+        self.cc.mol  = self.mol         
+        self.cc._scf = self.mf 
+        self.cc.mo_coeff = self.mf.mo_coeff
+        self.cc.mo_occ = self.mf.mo_occ
+        self.cc._nocc = self.Nel//2
+        self.cc._nmo = self.Norb
+        self.cc.chkfile = self.mf.chkfile
+        
+        # Run RCCSD and get RDMs    
+        if self.t1 is not None and self.t1.shape[0] == self.cc._nocc:            
+            t1_0 = self.t1
+            t2_0 = self.t2
+        else:
+            t1_0 = None 
+            t2_0 = None
+                       
+        Ecorr, t1, t2 = self.cc.kernel(t1=t1_0, t2=t2_0)
+        ET = self.cc.ccsd_t()
+        ECCSD_T = Ecorr + ET + self.mf.e_tot
+        self.t1 = t1
+        self.t2 = t2
+        if not self.cc.converged: print('           WARNING: The solver is not converged')   
+        
+        # Get CCSD(T) rdm
+        eris = self.cc.ao2mo()
+        l1, l2 = ccsd_t_lambda.kernel(self.cc, eris, t1, t2, verbose=self.verbose)[1:]
+        RDM1_mo = ccsd_t_rdm.make_rdm1(self.cc, t1=t1, t2=t2, l1=l1, l2=l2, eris=eris)
+        RDM2_mo = ccsd_t_rdm.make_rdm2(self.cc, t1=t1, t2=t2, l1=l1, l2=l2, eris=eris)
+
+        # Transform RDM1 , RDM2 to local basis
+        RDM1 = lib.einsum('ap,pq->aq', self.mf.mo_coeff, RDM1_mo)
+        RDM1 = lib.einsum('bq,aq->ab', self.mf.mo_coeff, RDM1)     
+        RDM2 = lib.einsum('ap,pqrs->aqrs', self.mf.mo_coeff, RDM2_mo)
+        RDM2 = lib.einsum('bq,aqrs->abrs', self.mf.mo_coeff, RDM2)
+        RDM2 = lib.einsum('cr,abrs->abcs', self.mf.mo_coeff, RDM2)
+        RDM2 = lib.einsum('ds,abcs->abcd', self.mf.mo_coeff, RDM2)        
+
+        # Compute the impurity energy        
+        ImpurityEnergy = 0.50  * lib.einsum('ij,ij->',     RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])                                                
+
+        # Compute total energy    
+        e_cell = self.kmf_ecore + ImpurityEnergy 
+
+        return (e_cell, ECCSD_T, RDM1)            
+        
+        
 #################################           
 ########## DMRG solver ########## 
 #################################           
