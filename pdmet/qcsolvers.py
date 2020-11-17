@@ -94,7 +94,8 @@ class QCsolvers:
                 self.CheMPS2print = True
             else:
                 self.CheMPS2print = False                                
-
+        elif self.solver == 'MP2': 
+            self.mp2 = None
         elif self.solver == 'RCCSD': 
             self.cc = cc.CCSD(self.mf)
             self.t1 = None
@@ -161,6 +162,57 @@ class QCsolvers:
         # Compute total energy        
         e_cell = self.kmf_ecore + ImpurityEnergy  
         return (e_cell, ERHF, RDM1) 
+        
+        
+##################################
+########## RCCSD solver ########## 
+##################################           
+    def MP2(self):
+        '''
+        MP2 solver
+        '''        
+
+        Nimp = self.Nimp
+        FOCKcopy = self.FOCK.copy() - self.chempot
+                
+        self.mol.nelectron = self.Nel
+        self.mf.__init__(self.mol)
+        self.mf.get_hcore = lambda *args: FOCKcopy
+        self.mf.get_ovlp = lambda *args: np.eye(self.Norb)
+        self.mf._eri = ao2mo.restore(8, self.TEI, self.Norb)
+        self.mf.scf(self.DMguess)       
+        DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+        if (self.mf.converged == False):
+            self.mf.newton().kernel(dm0=DMloc)
+            DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+
+        # MP2 calculation
+        self.mp2 = self.mf.MP2()
+        ecorr, t2 = self.mp2.kernel()
+        EMP2 = self.mf.e_tot + ecorr
+        RDM1_mo = self.mp2.make_rdm1(t2=t2)
+        RDM2_mo = self.mp2.make_rdm2(t2=t2)  
+
+        # Transform RDM1 , RDM2 to local basis
+        RDM1 = lib.einsum('ap,pq->aq', self.mf.mo_coeff, RDM1_mo)
+        RDM1 = lib.einsum('bq,aq->ab', self.mf.mo_coeff, RDM1)     
+        RDM2 = lib.einsum('ap,pqrs->aqrs', self.mf.mo_coeff, RDM2_mo)
+        RDM2 = lib.einsum('bq,aqrs->abrs', self.mf.mo_coeff, RDM2)
+        RDM2 = lib.einsum('cr,abrs->abcs', self.mf.mo_coeff, RDM2)
+        RDM2 = lib.einsum('ds,abcs->abcd', self.mf.mo_coeff, RDM2)        
+
+        # Compute the impurity energy        
+        ImpurityEnergy = 0.50  * lib.einsum('ij,ij->',     RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])                                                
+
+        # Compute total energy    
+        e_cell = self.kmf_ecore + ImpurityEnergy 
+
+        return (e_cell, EMP2, RDM1)  
+        
         
 ##################################
 ########## RCCSD solver ########## 
@@ -235,7 +287,77 @@ class QCsolvers:
 ##################################           
     def RCCSD_T(self):
         '''
-        Couple-cluster Single-Double (T) 
+        Couple-cluster Single-Double (T) with CCSD RDM 
+        '''        
+
+        Nimp = self.Nimp
+        FOCKcopy = self.FOCK.copy() - self.chempot
+                
+        self.mol.nelectron = self.Nel
+        self.mf.__init__(self.mol)
+        self.mf.get_hcore = lambda *args: FOCKcopy
+        self.mf.get_ovlp = lambda *args: np.eye(self.Norb)
+        self.mf._eri = ao2mo.restore(8, self.TEI, self.Norb)
+        self.mf.scf(self.DMguess)       
+        DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+        if (self.mf.converged == False):
+            self.mf.newton().kernel(dm0=DMloc)
+            DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+
+        # Modify CC object using the correct mol, mf objects
+        self.cc.mol  = self.mol         
+        self.cc._scf = self.mf 
+        self.cc.mo_coeff = self.mf.mo_coeff
+        self.cc.mo_occ = self.mf.mo_occ
+        self.cc._nocc = self.Nel//2
+        self.cc._nmo = self.Norb
+        self.cc.chkfile = self.mf.chkfile
+        
+        # Run RCCSD and get RDMs    
+        if self.t1 is not None and self.t1.shape[0] == self.cc._nocc:            
+            t1_0 = self.t1
+            t2_0 = self.t2
+        else:
+            t1_0 = None 
+            t2_0 = None
+                       
+        Ecorr, t1, t2 = self.cc.kernel(t1=t1_0, t2=t2_0)
+        ET = self.cc.ccsd_t()
+        ECCSD_T = Ecorr + ET + self.mf.e_tot
+        self.t1 = t1
+        self.t2 = t2
+        if not self.cc.converged: print('           WARNING: The solver is not converged')   
+        
+        # Get CCSD rdm
+        RDM1_mo = self.cc.make_rdm1(t1=t1, t2=t2)
+        RDM2_mo = self.cc.make_rdm2(t1=t1, t2=t2)  
+
+        # Transform RDM1 , RDM2 to local basis
+        RDM1 = lib.einsum('ap,pq->aq', self.mf.mo_coeff, RDM1_mo)
+        RDM1 = lib.einsum('bq,aq->ab', self.mf.mo_coeff, RDM1)     
+        RDM2 = lib.einsum('ap,pqrs->aqrs', self.mf.mo_coeff, RDM2_mo)
+        RDM2 = lib.einsum('bq,aqrs->abrs', self.mf.mo_coeff, RDM2)
+        RDM2 = lib.einsum('cr,abrs->abcs', self.mf.mo_coeff, RDM2)
+        RDM2 = lib.einsum('ds,abcs->abcd', self.mf.mo_coeff, RDM2)        
+
+        # Compute the impurity energy        
+        ImpurityEnergy = 0.50  * lib.einsum('ij,ij->',     RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])                                                
+
+        # Compute total energy    
+        e_cell = self.kmf_ecore + ImpurityEnergy 
+
+        return (e_cell, ECCSD_T, RDM1)            
+        
+##################################
+########## RCCSD(T) solver ########## 
+##################################           
+    def RCCSD_T_slow(self):
+        '''
+        Couple-cluster Single-Double (T) with full CCSD(T) rdm, very very expensive
         '''        
 
         Nimp = self.Nimp
@@ -277,7 +399,7 @@ class QCsolvers:
         if not self.cc.converged: print('           WARNING: The solver is not converged')   
         
         # Get CCSD(T) rdm
-        eris = self.cc.ao2mo()
+        eris = self.cc.ao2mo()      # Consume too much memory, need to be fixed!
         l1, l2 = ccsd_t_lambda.kernel(self.cc, eris, t1, t2, verbose=self.verbose)[1:]
         RDM1_mo = ccsd_t_rdm.make_rdm1(self.cc, t1=t1, t2=t2, l1=l1, l2=l2, eris=eris)
         RDM2_mo = ccsd_t_rdm.make_rdm2(self.cc, t1=t1, t2=t2, l1=l1, l2=l2, eris=eris)
@@ -300,8 +422,7 @@ class QCsolvers:
         # Compute total energy    
         e_cell = self.kmf_ecore + ImpurityEnergy 
 
-        return (e_cell, ECCSD_T, RDM1)            
-        
+        return (e_cell, ECCSD_T, RDM1) 
         
 #################################           
 ########## DMRG solver ########## 
@@ -635,9 +756,9 @@ class QCsolvers:
 #########################################        
 ########## CASSCF/CASCI solver ##########
 #########################################          
-    def CAS(self, solver = 'FCI'):
+    def SS_CAS(self, solver = 'FCI'):
         '''
-        CASCI/CASSCF with FCI or DMRG solver
+        CASCI/CASSCF with FCI or DMRG solver for a 1 root calculation
         '''        
 
         Nimp = self.Nimp
@@ -686,7 +807,7 @@ class QCsolvers:
         elif self.molist is not None: 
             mo = self.mc.sort_mo(self.molist)
             e_tot, e_cas, civec = self.mc.kernel(mo)[:3]            
-        else: 
+        else:   # For CASCI
             e_tot, e_cas, civec = self.mc.kernel()[:3]
     
         if self.mc.converged == False: print('           WARNING: The solver is not converged')
@@ -734,4 +855,160 @@ class QCsolvers:
         # Compute total energy    
         e_cell = self.kmf_ecore + ImpurityEnergy               
 
-        return (e_cell, e_tot, RDM1)                
+        return (e_cell, e_tot, RDM1)        
+
+#########################################        
+########## CASSCF/CASCI solver ##########
+#########################################          
+    def CAS(self, solver = 'FCI'):
+        '''
+        CASCI/CASSCF with FCI or DMRG solver for a multiple roots calculation
+        '''        
+
+        Nimp = self.Nimp
+        FOCKcopy = self.FOCK.copy() - self.chempot
+                
+        self.mol.nelectron = self.Nel
+        self.mf.__init__(self.mol)
+        self.mf.get_hcore = lambda *args: FOCKcopy
+        self.mf.get_ovlp = lambda *args: np.eye(self.Norb)
+        self.mf._eri = ao2mo.restore(8, self.TEI, self.Norb)
+        self.mf.scf(self.DMguess)       
+        DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+        if (self.mf.converged == False):
+            self.mf.newton().kernel(dm0=DMloc)
+            DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
+    
+        if self.cas == None:
+            cas_nelec = self.Nel
+            cas_norb = self.Norb
+        else:
+            cas_nelec = self.cas[0]
+            cas_norb = self.cas[1]
+
+        # Updating mc object from the new mf, mol objects     
+        self.mc.mol = self.mol   
+        self.mc._scf = self.mf 
+        self.mc.ncas = cas_norb
+        nelecb = (cas_nelec - self.mol.spin)//2
+        neleca = cas_nelec - nelecb
+        self.mc.nelecas = (neleca, nelecb)
+        ncorelec = self.mol.nelectron - (self.mc.nelecas[0] + self.mc.nelecas[1])     
+        assert(ncorelec % 2 == 0)
+        self.mc.ncore = ncorelec // 2       
+        self.mc.mo_coeff = self.mf.mo_coeff
+        self.mc.mo_energy = self.mf.mo_energy
+            
+        # Define FCI solver
+        if solver == 'CheMPS2':      
+            self.mc.fcisolver = dmrgscf.CheMPS2(self.mol)
+        elif solver == 'FCI' and self.e_shift != None:         
+            target_SS = 0.5*self.twoS*(0.5*self.twoS + 1)
+            self.mc.fix_spin_(shift = self.e_shift, ss = target_SS)                  
+    
+        self.mc.fcisolver.nroots = self.nroots 
+        if self.mo is not None and self.solver in ['CASSCF', 'DMRG-SCF']: 
+            e_tot, e_cas, fcivec = self.mc.kernel(self.mo)[:3]
+        elif self.molist is not None: 
+            mo = self.mc.sort_mo(self.molist)
+            e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3]            
+        else: 
+            e_tot, e_cas, fcivec = self.mc.kernel()[:3]
+    
+        if self.mc.converged == False: print('           WARNING: The solver is not converged')
+        
+        # Save mo for the next iterations
+        self.mo     = self.mc.mo_coeff           
+   
+        # Compute energy and RDM1      
+        if self.nroots == 1:
+            civec = fcivec
+            self.SS = self.mc.fcisolver.spin_square(civec, self.Norb, self.mol.nelec)[0]
+            RDM1_mo , RDM2_mo = self.mc.fcisolver.make_rdm12(civec, self.Norb, self.mol.nelec)
+            
+            ###### Get RDM1 + RDM2 #####
+            core_norb = self.mc.ncore    
+            core_MO = self.mc.mo_coeff[:,:core_norb]
+            active_MO = self.mc.mo_coeff[:,core_norb:core_norb+cas_norb] 
+            casdm1_mo, casdm2_mo = self.mc.fcisolver.make_rdm12(self.mc.ci, cas_norb, self.mc.nelecas) #in CAS(MO) space    
+
+            # Transform the casdm1_mo to local basis
+            casdm1 = lib.einsum('ap,pq->aq', active_MO, casdm1_mo)
+            casdm1 = lib.einsum('bq,aq->ab', active_MO, casdm1)
+            coredm1 = np.dot(core_MO, core_MO.T) * 2 #in local basis
+            RDM1 = coredm1 + casdm1   
+            
+            # Transform the casdm2_mo to local basis
+            casdm2 = lib.einsum('ap,pqrs->aqrs', active_MO, casdm2_mo)
+            casdm2 = lib.einsum('bq,aqrs->abrs', active_MO, casdm2)
+            casdm2 = lib.einsum('cr,abrs->abcs', active_MO, casdm2)
+            casdm2 = lib.einsum('ds,abcs->abcd', active_MO, casdm2)    
+        
+            coredm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb])
+            coredm2 += lib.einsum('pq,rs-> pqrs',coredm1,coredm1)
+            coredm2 -= 0.5*lib.einsum('ps,rq-> pqrs',coredm1,coredm1)
+
+            effdm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb])
+            effdm2 += 2*lib.einsum('pq,rs-> pqrs',casdm1,coredm1)
+            effdm2 -= lib.einsum('ps,rq-> pqrs',casdm1,coredm1)                
+                        
+            RDM2 = coredm2 + casdm2 + effdm2               
+            
+            ImpurityEnergy = 0.50  * lib.einsum('ij,ij->',     RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                       + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
+            e_cell = self.kmf_ecore + ImpurityEnergy         
+        else:
+            tot_SS = 0 
+            RDM1 = []  
+            e_cell = []           
+            for i, civec in enumerate(fcivec):
+                SS = self.mc.fcisolver.spin_square(civec, self.Norb, self.mol.nelec)[0]
+                RDM1_mo , RDM2_mo = self.mc.fcisolver.make_rdm12(civec, self.Norb, self.mol.nelec)
+                
+                ###### Get RDM1 + RDM2 #####
+                core_norb = self.mc.ncore    
+                core_MO = self.mc.mo_coeff[:,:core_norb]
+                active_MO = self.mc.mo_coeff[:,core_norb:core_norb+cas_norb] 
+                casdm1_mo, casdm2_mo = self.mc.fcisolver.make_rdm12(civec, cas_norb, self.mc.nelecas) #in CAS(MO) space    
+
+                # Transform the casdm1_mo to local basis
+                casdm1 = lib.einsum('ap,pq->aq', active_MO, casdm1_mo)
+                casdm1 = lib.einsum('bq,aq->ab', active_MO, casdm1)
+                coredm1 = np.dot(core_MO, core_MO.T) * 2 #in local basis
+                rdm1 = coredm1 + casdm1   
+                
+                # Transform the casdm2_mo to local basis
+                casdm2 = lib.einsum('ap,pqrs->aqrs', active_MO, casdm2_mo)
+                casdm2 = lib.einsum('bq,aqrs->abrs', active_MO, casdm2)
+                casdm2 = lib.einsum('cr,abrs->abcs', active_MO, casdm2)
+                casdm2 = lib.einsum('ds,abcs->abcd', active_MO, casdm2)    
+            
+                coredm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb])
+                coredm2 += lib.einsum('pq,rs-> pqrs',coredm1,coredm1)
+                coredm2 -= 0.5*lib.einsum('ps,rq-> pqrs',coredm1,coredm1)
+
+                effdm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb])
+                effdm2 += 2*lib.einsum('pq,rs-> pqrs',casdm1,coredm1)
+                effdm2 -= lib.einsum('ps,rq-> pqrs',casdm1,coredm1)                
+                            
+                rdm2 = coredm2 + casdm2 + effdm2         
+                
+                Imp_Energy_state = 0.50  * lib.einsum('ij,ij->',     rdm1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
+                Imp_e = self.kmf_ecore + Imp_Energy_state               
+                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, e_tot[i], Imp_e, SS))                 
+                tot_SS += SS                              
+                RDM1.append(rdm1) 
+                e_cell.append(Imp_e)              
+            RDM1 = lib.einsum('i,ijk->jk',self.state_percent, RDM1) 
+            e_cell = lib.einsum('i,i->',self.state_percent, e_cell)                
+            self.SS = tot_SS/self.nroots  
+        
+        return (e_cell, e_tot, RDM1)    
+        

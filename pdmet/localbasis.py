@@ -109,9 +109,10 @@ class Local:
             self.vklr = self.kmf.get_k(self.cell, self.dm, 1, self.kpts, None, omega=self.xc_omega)
             self.vksr = self.vk - self.vklr
         
-    def make_loc_1RDM_kpts(self, umat, OEH_type='FOCK', get_band=False, get_ham=False, dft_HF=None):
+    def make_loc_1RDM_kpts(self, umat, mask4Gamma, OEH_type='FOCK', get_band=False, get_ham=False, dft_HF=None):
         '''
         Construct 1-RDM at each k-point in the local basis given a u mat
+        mask is used for the Gamma-sampling case
         '''    
         
         # Get modified mean-field Hamiltinian: h_tilder = h + u
@@ -119,7 +120,12 @@ class Local:
             OEH_kpts = self.loc_actFOCK_kpts + umat  
         else:
             # For DF-like cost function
-            OEH_kpts = df_hamiltonian.get_OEH_kpts(self, umat,  xc_type=OEH_type,  dft_HF=dft_HF)
+            if mask4Gamma is not None:
+                OEH_kpts = self.loc_actFOCK_kpts[0].copy()
+                OEH_kpts[mask4Gamma] = df_hamiltonian.get_OEH_kpts(self, umat,  xc_type=OEH_type,  dft_HF=dft_HF)[0][mask4Gamma] 
+                OEH_kpts = OEH_kpts.reshape(-1, self.nlo, self.nlo)
+            else:
+                OEH_kpts = df_hamiltonian.get_OEH_kpts(self, umat,  xc_type=OEH_type,  dft_HF=dft_HF)
             
         if self.spin == 0:
             eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
@@ -140,11 +146,11 @@ class Local:
             pass 
             # TODO: contruct RDM for a ROHF wave function            
         
-    def make_loc_1RDM(self, umat, OEH_type='FOCK', dft_HF=None):
+    def make_loc_1RDM(self, umat, mask4Gamma, OEH_type='FOCK', dft_HF=None):
         '''
         Construct the local 1-RDM at the reference unit cell
         '''    
-        loc_OEH_kpts, loc_1RDM_kpts = self.make_loc_1RDM_kpts(umat, OEH_type=OEH_type, dft_HF=dft_HF)
+        loc_OEH_kpts, loc_1RDM_kpts = self.make_loc_1RDM_kpts(umat, mask4Gamma, OEH_type=OEH_type, dft_HF=dft_HF)
         loc_1RDM_R0 = self.k_to_R0(loc_1RDM_kpts)
         return loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0
         

@@ -64,16 +64,17 @@ class pDMET:
         self.OEH_type = 'FOCK' # Options: FOCK/OEI        
         
         # QC Solver    
-        solver_list   = ['HF', 'CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF', 'FCI', 'DMRG', 'RCCSD', 'RCCSD_T', 'SHCI']
-        assert solver in solver_list, "Solver options: HF, CASCI, CASSCF, DMRG-CI, DMRG-SCF, FCI, DMRG, RCCSD, SHCI"
+        solver_list   = ['HF', 'MP2', 'CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF', 'FCI', 'DMRG', 'RCCSD', 'RCCSD_T', 'SHCI']
+        assert solver in solver_list, "Solver options: HF, MP2, CASCI, CASSCF, DMRG-CI, DMRG-SCF, FCI, DMRG, RCCSD, SHCI"
         self.solver   = solver        
         self.e_shift  = None         # Use to fix spin of the wrong state with FCI, hence CASCI/CASSCF solver
         self.use_GDF  = True          # Mostly using for FFTDF where density fitting is not available
         
         # Gamma sampling embedding
         self.impCluster = None
-        self._impOrbs_threshold = 0.5
+        self._impOrbs_threshold = 1.0
         self._impOrbs_rmlist = None
+        self._impOrbs_addlist = None
         self._num_bath = None
 
         # Parameters    
@@ -161,7 +162,8 @@ class pDMET:
         # For the Gamma-sampling DMET
         if self.impCluster is not None:
             assert np.prod(self.kmesh) == 1, "impCluster is used only for a Gamma-point sampling calculation"
-            self._impOrbs, self._impAtms = misc.make_imp_orbs(self.cell, self.w90, self.impCluster, threshold=self._impOrbs_threshold, rm_list=self._impOrbs_rmlist)
+            self._impOrbs, self._impAtms = misc.make_imp_orbs(self.cell, self.w90, self.impCluster, \
+                                    threshold=self._impOrbs_threshold, rm_list=self._impOrbs_rmlist, add_list=self._impOrbs_addlist)
             self.Nimp = np.sum(self._impOrbs)
             self._is_gamma = True
             
@@ -206,7 +208,11 @@ class pDMET:
         else:            
             self.Nterms = self.Nimp*(self.Nimp + 1) // 2 
 
-        self.mask = self.make_mask(self._is_gamma)   
+        self.mask = self.make_mask(self._is_gamma)  
+        if self._is_gamma: 
+            self.mask4Gamma = self.mask
+        else:
+            self.mask4Gamma = None
         self.H1start, self.H1row, self.H1col = self.make_H1(self._is_gamma, self._impOrbs)[1:4]    #Use in the calculation of 1RDM derivative
   
                   
@@ -219,7 +225,8 @@ class pDMET:
         self.umat = self.uvec2umat(self.uvec)
 
         # -------------------------------------------------       
-        # Load/initiate chem pot, uvec, umat    
+        # Load/initiate chem pot, uvec, umat  
+        # TODO: no longer used, Consider to remove this
         self.restart_success = False        
         if self.chkfile is not None and self.restart == True:
             if tunix.check_exist(self.chkfile):
@@ -252,7 +259,7 @@ class pDMET:
 
         # Initializing the QC solver
         if self.nroots > 1:
-            if self.solver not in ['FCI', 'DMRG']: raise Exception('Only FCI or DMRG solver supports excited state calculations')
+            if self.solver not in ['CASCI', 'FCI', 'DMRG']: raise Exception('Solvers that support excited state calculations are CASCI, CASSCF, FCI, DMRG')
             if self.state_percent == None: 
                 self.state_percent = [1/self.nroots]*self.nroots
             else:
@@ -306,6 +313,8 @@ class pDMET:
                                 self.emb_coreJK, emb_guess_1RDM, self.Nimp + self.Nbath, self.Nelec_in_emb, self.Nimp, chempot)
         if self.solver == 'HF':
             e_cell, e_solver, RDM1 = self.qcsolver.HF()
+        elif self.solver == 'MP2':
+            e_cell, e_solver, RDM1 = self.qcsolver.MP2()
         elif self.solver in ['CASCI','CASSCF']:
             e_cell, e_solver, RDM1 = self.qcsolver.CAS()    
         elif self.solver in ['DMRG-CI','DMRG-SCF']:
@@ -351,7 +360,7 @@ class pDMET:
             self.nelec_per_cell = self.Nelec_total
             self.e_tot = e_solver + self.core_energy + self.local.e_core
             self.e_emb = e_solver 
-            self.e_imp = e_cell - self.local.e_core   
+            self.e_imp = e_cell - self.local.e_core  
         else:
             self.nelec_per_cell = np.trace(RDM1[:self.Nimp,:self.Nimp])
             self.e_tot = e_cell   
@@ -387,7 +396,7 @@ class pDMET:
         else:
             umat = 0.
             
-        self.loc_OEH_kpts, self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(umat, OEH_type=self.OEH_type, dft_HF=None)      
+        self.loc_OEH_kpts, self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(umat, self.mask4Gamma, OEH_type=self.OEH_type, dft_HF=None)      
         
         self.emb_orbs, self.core_orbs, self.Nbath, self.Nelec_in_emb = self.bath_contruction(self.loc_1RDM_R0, self._impOrbs)
         
@@ -427,18 +436,13 @@ class pDMET:
             
         self._cycle = 1 
         if not proj_DMET:
-            self.loc_OEH_kpts, self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(umat, OEH_type=self.OEH_type, dft_HF=self.dft_HF)       
+            self.loc_OEH_kpts, self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(umat, self.mask4Gamma, OEH_type=self.OEH_type, dft_HF=self.dft_HF)       
                     
         self.emb_orbs, self.core_orbs, self.Nbath, self.Nelec_in_emb = self.bath_contruction(self.loc_1RDM_R0, self._impOrbs)
 
         # Optimize the chemical potential
         if self._is_gamma:
             nelec_per_cell_from_embedding = self.kernel(chempot=0.0)
-            tprint.print_msg("   Energy decomposition:")
-            tprint.print_msg("     Impurity                : %12.8f" % (self.e_imp))
-            tprint.print_msg("     Bath                    : %12.8f" % (self.e_emb - self.e_imp))
-            tprint.print_msg("     Environment             : %12.8f" % (self.core_energy))
-            tprint.print_msg("     Nuc + Frozen            : %12.8f" % (self.local.e_core))
         else:
             self.chempot = optimize.newton(self.nelec_cost_func, self.chempot)
             tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_per_cell))
@@ -473,7 +477,7 @@ class pDMET:
         #------------------------------------#
         #---- SELF-CONSISTENT PROCEDURE ----#      
         #------------------------------------#    
-        OEH_kpts, rdm1_kpts, rdm1_R0 = self.local.make_loc_1RDM(self.umat, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
+        OEH_kpts, rdm1_kpts, rdm1_R0 = self.local.make_loc_1RDM(self.umat, self.mask4Gamma, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
         for cycle in range(self.SC_maxcycle):
             
             tprint.print_msg("- CYCLE %d:" % (cycle + 1))    
@@ -573,7 +577,7 @@ class pDMET:
         #------------------------------------#
         #---- SELF-CONSISTENT PROCEDURE ----#     
         #------------------------------------#    
-        self.loc_OEH_kpts, self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(0.0, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
+        self.loc_OEH_kpts, self.loc_1RDM_kpts, self.loc_1RDM_R0 = self.local.make_loc_1RDM(0.0, self.mask4Gamma, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
         global_corr_1RDM = self.local.k_to_R(self.loc_1RDM_kpts)
         for cycle in range(self.SC_maxcycle):
             tprint.print_msg("- CYCLE %d:" % (cycle + 1))  
@@ -668,7 +672,7 @@ class pDMET:
             error            : an array of errors for the unit cell.
         '''
 
-        loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0 = self.local.make_loc_1RDM(self.uvec2umat(uvec), OEH_type=self.OEH_type, dft_HF=self.dft_HF)
+        loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0 = self.local.make_loc_1RDM(self.uvec2umat(uvec), self.mask4Gamma, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
         if self.SC_CFtype in ['F', 'diagF']:        
             mf_1RDM = self.local.loc_kpts_to_emb(loc_1RDM_kpts, self.emb_orbs[:,:,:self.Nimp])
             corr_1RDM = self.emb_corr_1RDM[:self.Nimp,:self.Nimp]              
@@ -731,7 +735,7 @@ class pDMET:
         Return:
             error            : an array of errors for the unit cell.
         '''                     
-        loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0 = self.local.make_loc_1RDM(self.uvec2umat(uvec), OEH_type=self.OEH_type, dft_HF=self.dft_HF)
+        loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0 = self.local.make_loc_1RDM(self.uvec2umat(uvec), self.mask4Gamma, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
         error = loc_1RDM_R0 - self.loc_corr_1RDM_R0
         return error
         
@@ -763,7 +767,7 @@ class pDMET:
         
         umat = self.uvec2umat(uvec)
                      
-        loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0 = self.local.make_loc_1RDM(umat, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
+        loc_OEH_kpts, loc_1RDM_kpts, loc_1RDM_R0 = self.local.make_loc_1RDM(umat, self.mask4Gamma, OEH_type=self.OEH_type, dft_HF=self.dft_HF)
         if self.OEH_type == 'FOCK':
             OEH = self.local.loc_actFOCK_kpts #+umat
             OEH = self.local.k_to_R(OEH)
@@ -822,7 +826,7 @@ class pDMET:
             if self.SC_CFtype in ['F', 'FB']:
                 mask[np.triu_indices(self.Nimp)] = True
             else:
-                np.fill_diagonal(mask, True)
+                np.fill_diagonal(mask, True)      
         return mask            
 
     def uvec2umat(self, uvec):
@@ -975,9 +979,9 @@ class pDMET:
             tprint.print_msg('Band structure error: %12.8f' % (error))
             
         if self.dft_CF:
-            eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), OEH_type=self.xc, get_band=True, dft_HF=self.dft_HF)
+            eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), self.mask4Gamma, OEH_type=self.xc, get_band=True, dft_HF=self.dft_HF)
         else:
-            eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), OEH_type='FOCK', get_band=True, dft_HF=self.dft_HF)
+            eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(uvec), self.mask4Gamma, OEH_type='FOCK', get_band=True, dft_HF=self.dft_HF)
 
         dmet_orbs = lib.einsum('kpq,kqr->kpr', self.local.ao2lo, eigvecs) # embedding orbs are spaned by AO instead of MLWFs here
         mo_coeff_kpts = []
@@ -1007,7 +1011,7 @@ class pDMET:
             Return:
                 eigenvalues and eigenvectors at the desired kpts
         '''
-        OEH_kpts, eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(self.uvec), OEH_type=self.xc, get_ham=True, dft_HF=self.dft_HF)
+        OEH_kpts, eigvals, eigvecs = self.local.make_loc_1RDM_kpts(self.uvec2umat(self.uvec), self.mask4Gamma, OEH_type=self.xc, get_ham=True, dft_HF=self.dft_HF)
         eigvals, eigvecs = self.w90.interpolate_band(frac_kpts, OEH_kpts, use_ws_distance, 
                                                     ws_search_size, ws_distance_tol)
         return (eigvals, eigvecs)

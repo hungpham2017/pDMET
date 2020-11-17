@@ -54,12 +54,13 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, num_bath=None, thr
     distance_from_1 = distance_from_1[idx]
     sigma = sigma[idx]
     U[:,:Nimp] = U[:,:Nimp][:,idx]
-    V = Vh.T#[:,idx]
+    V = Vh.T
     
     # Eliminate unentangled bath using a threshold:
-    Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()
+    #Nbath = (np.abs(distance_from_1 - 1) > threshold).sum()
     if num_bath is not None: Nbath = num_bath
-    if Nbath == 0: Nbath = Nimp         # Avoid zero bath situation
+    # if Nbath == 0: Nbath = Nimp         # Avoid zero bath situation
+    Nbath = Nimp 
 
     # Assemble the embedding + core orbitals
     Nemb = Nimp + Nbath

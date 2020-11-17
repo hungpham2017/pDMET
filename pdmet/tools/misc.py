@@ -25,7 +25,7 @@ import numpy as np
             
             
 BOHR = 0.52917721092
-def make_imp_orbs(cell, w90, impCluster, threshold=0.5, rm_list=None):
+def make_imp_orbs(cell, w90, impCluster, threshold=0.5, rm_list=None, add_list=None):
     '''Attribute:
             cell            : PySCF cell object
             w90             : the w90 object for MLWFs
@@ -68,6 +68,8 @@ def make_imp_orbs(cell, w90, impCluster, threshold=0.5, rm_list=None):
     # Set the minimum distance of the undesired orbitals to 100.0, hence they get removed
     if rm_list is not None:
         min_distance[rm_list] = 100.0
+    if add_list is not None:
+        min_distance[add_list] = 0.01
         
     # Label by 1 only the impurity orbitals
     impOrbs = np.zeros(num_wann, dtype=int)
