@@ -283,16 +283,19 @@ class pDMET:
         if self.twoS != 0 and self.solver == 'RCCSD': 
             raise Exception('RCCSD solver does not support ROHF wave function')             
 
-        # For FCI solver
+        # For FCI, CAS-like solver
         self._SS = 0.5*self.twoS*(0.5*self.twoS + 1)       
         self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self.e_shift, self.nroots, self.state_percent, verbose=self.verbose, memory=self.max_memory) 
         if self.solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
             self.qcsolver.cas = self.cas
             self.qcsolver.molist = self.molist 
-            if "SS-" in self.solver: assert self.nroots > self.state_specific_, "Increasing the number of roots in the FCI solver"
+            if "SS-" in self.solver: 
+                assert self.nroots > self.state_specific_, "Increasing the number of roots in the FCI solver"
             if "SA-" in self.solver: 
                 self.qcsolver.nroots = len(self.state_average_) 
-        
+        if self.nevpt2_roots is not None:
+            assert self.nevpt2_nroots >= len(self.nevpt2_roots), "Increasing the number of roots in the FCI solver"
+            
         tprint.print_msg("Initializing ... DONE")       
                 
     def kernel(self, chempot=0.0):

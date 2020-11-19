@@ -53,11 +53,12 @@ class QCsolvers:
             self.cas    = None
             self.molist = None   
             self.mo     = None  
-            self.mo_nat = None       
+            self.mo_nat = None   
             self.mc = mcscf.CASCI(self.mf, 2, 2)
             self.nroots = nroots   
             self.mc.verbose = verbose 
             self.mc.max_memory = memory
+            self.mc.natorb = True
         elif self.solver is 'DMRG-CI':
             from pyscf import dmrgscf  
             self.cas    = None
@@ -67,7 +68,8 @@ class QCsolvers:
             self.mc = mcscf.CASCI(self.mf, 2, 2)
             self.nroots = nroots   
             self.mc.verbose = verbose 
-            self.mc.max_memory = memory    
+            self.mc.max_memory = memory 
+            self.mc.natorb = True            
         elif self.solver in ['CASSCF','SS-CASSCF','SA-CASSCF']:
             self.cas    = None
             self.molist = None   
@@ -75,7 +77,8 @@ class QCsolvers:
             self.mo_nat = None              
             self.mc = mcscf.CASSCF(self.mf, 2, 2)
             self.nroots = nroots  
-            self.mc.verbose = verbose    
+            self.mc.verbose = verbose
+            self.mc.natorb = True            
         elif self.solver in ['SS-DMRG-SCF','SA-CASSCF','SA-DMRG-SCF']:
             from pyscf import dmrgscf 
             self.cas    = None
@@ -85,6 +88,7 @@ class QCsolvers:
             self.mc = mcscf.CASSCF(self.mf, 2, 2)
             self.nroots = nroots  
             self.mc.verbose = verbose 
+            self.mc.natorb = True 
         elif self.solver == 'FCI':          
             self.fs = None
             self.fs_conv_tol            = 1e-10   
@@ -832,7 +836,7 @@ class QCsolvers:
         if not self.mc.converged: print('           WARNING: The solver is not converged')
         
         # Save mo for the next iterations
-        self.mo     = self.mc.mo_coeff           
+        self.mo_nat     = self.mc.mo_coeff           
    
         # Compute energy and RDM1      
         if self.nroots == 1:
@@ -924,16 +928,24 @@ class QCsolvers:
             e_cell = lib.einsum('i,i->',self.state_percent, e_cell)                
             self.SS = tot_SS/self.nroots  
         
-            if nevpt2_roots is not None:
-                # Run NEVPT2
-                e_nevpt = []
-                for root in nevpt2_roots:
-                    e_corr = mrpt.NEVPT(self.mc, root).kernel()
-                    e_nevpt_tot = self.mc.e_tot[root] + e_corr
-                    e_nevpt.append(e_nevpt_tot)
-                
-                #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
-                e_tot = (e_tot, e_nevpt)
+        if nevpt2_roots is not None:
+            # Run a CASCI for an excited-state wfn
+            if solver == 'FCI' and self.e_shift is not None: 
+                mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+                mc_CASCI = mc_CASCI.fix_spin_(shift=self.e_shift, ss=target_SS) 
+            else:
+                mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+            mc_CASCI.fcisolver.nroots = nevpt2_nroots
+            mc_CASCI.kernel(self.mc.mo_coeff)
+
+            # Run NEVPT2
+            e_nevpt = []
+            for root in nevpt2_roots:
+                e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
+                e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
+                e_nevpt.append(e_nevpt_tot)
+            #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
+            e_tot = (e_tot, e_nevpt)
                 
         return (e_cell, e_tot, RDM1)
         
@@ -998,7 +1010,7 @@ class QCsolvers:
         # Define FCI solver
         if solver == 'CheMPS2':      
             self.mc.fcisolver = dmrgscf.CheMPS2(self.mol)
-        elif solver == 'FCI' and self.e_shift != None:         
+        elif solver == 'FCI' and self.e_shift is not None:         
             target_SS = 0.5*self.twoS*(0.5*self.twoS + 1)
             self.mc.fix_spin_(shift=self.e_shift, ss=target_SS)                  
     
@@ -1007,7 +1019,6 @@ class QCsolvers:
             mo = self.mo
         elif self.molist is not None: 
             mo = self.mc.sort_mo(self.molist)
-            print(self.molist)
         else: 
             mo = self.mc.mo_coeff
             
@@ -1018,7 +1029,7 @@ class QCsolvers:
         if self.mc.converged == False: print('           WARNING: The solver is not converged')
         
         # Save mo for the next iterations
-        self.mo     = self.mc.mo_coeff           
+        self.mo_nat     = self.mc.mo_coeff           
    
         # Compute energy and RDM1      
         if self.nroots == 1 or state_specific_ is not None:
@@ -1115,17 +1126,20 @@ class QCsolvers:
             
         if nevpt2_roots is not None:
             # Run a CASCI for an excited-state wfn
-            mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+            if solver == 'FCI' and self.e_shift is not None: 
+                mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+                mc_CASCI = mc_CASCI.fix_spin_(shift=self.e_shift, ss=target_SS) 
+            else:
+                mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
             mc_CASCI.fcisolver.nroots = nevpt2_nroots
             mc_CASCI.kernel(self.mc.mo_coeff)
-            
+
             # Run NEVPT2
             e_nevpt = []
             for root in nevpt2_roots:
                 e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
                 e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
                 e_nevpt.append(e_nevpt_tot)
-            
             #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
             e_tot = (e_tot, e_nevpt)
                 
