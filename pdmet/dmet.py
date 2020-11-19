@@ -64,8 +64,13 @@ class pDMET:
         self.OEH_type = 'FOCK' # Options: FOCK/OEI        
         
         # QC Solver    
-        solver_list   = ['HF', 'MP2', 'CASCI', 'CASSCF', 'DMRG-CI', 'DMRG-SCF', 'FCI', 'DMRG', 'RCCSD', 'RCCSD_T', 'SHCI']
-        assert solver in solver_list, "Solver options: HF, MP2, CASCI, CASSCF, DMRG-CI, DMRG-SCF, FCI, DMRG, RCCSD, SHCI"
+        solver_list   = ['HF', 'MP2', 'CASCI', 'DMRG-CI', 'CASSCF', 'DMRG-SCF', \
+                            'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF', \
+                            'FCI', 'DMRG', 'RCCSD', 'RCCSD_T', 'SHCI'
+                            ]
+        assert solver in solver_list, "Solver options: HF, MP2, CASCI, DMRG-CI, \
+                                     CASSCF, DMRG-SCF,SS-CASSCF, SS-DMRG-SCF, SA-CASSCF, SA-DMRG-SCF \
+                                     FCI, DMRG, RCCSD, SHCI"
         self.solver   = solver        
         self.e_shift  = None         # Use to fix spin of the wrong state with FCI, hence CASCI/CASSCF solver
         self.use_GDF  = True          # Mostly using for FFTDF where density fitting is not available
@@ -76,7 +81,15 @@ class pDMET:
         self._impOrbs_rmlist = None
         self._impOrbs_addlist = None
         self._num_bath = None
-
+        self.nroots = 10
+        if solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
+            self.cas    = None
+            self.molist = None  
+            if solver in ['SS-CASSCF', 'SS-DMRG-SCF']:
+                self.state_specific_ = 0
+            elif solver in ['SA-CASSCF', 'SA-DMRG-SCF']:
+                self.state_average_ = [0.5, 0.5]
+        
         # Parameters    
         self.SC_method          = "BFGS"        # BFGS, CG, Newton-CG
         self.SC_threshold       = 1e-4            
@@ -95,7 +108,6 @@ class pDMET:
         self.DIIS_n             = 8  
         
         # DMET Output
-        self.nroots             = 1
         self.state_percent      = None        
         self.twoS               = 0
         self.verbose            = 0
@@ -259,19 +271,25 @@ class pDMET:
 
         # Initializing the QC solver
         if self.nroots > 1:
-            if self.solver not in ['CASCI', 'FCI', 'DMRG']: raise Exception('Solvers that support excited state calculations are CASCI, CASSCF, FCI, DMRG')
             if self.state_percent == None: 
                 self.state_percent = [1/self.nroots]*self.nroots
             else:
                 assert len(self.state_percent) == self.nroots
                 assert abs(sum(self.state_percent) - 1.0) < 1.e-10      # The total percent has be 1   
                 
-        if self.twoS != 0 and self.solver == 'RCCSD': raise Exception('RCCSD solver does not support ROHF wave function')             
+        if self.twoS != 0 and self.solver == 'RCCSD': 
+            raise Exception('RCCSD solver does not support ROHF wave function')             
 
         # For FCI solver
         self._SS = 0.5*self.twoS*(0.5*self.twoS + 1)       
         self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self.e_shift, self.nroots, self.state_percent, verbose=self.verbose, memory=self.max_memory) 
-
+        if self.solver in ['CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
+            self.qcsolver.cas = self.cas
+            self.qcsolver.molist = self.molist
+            if "SS-" in self.solver: assert self.nroots > self.state_specific_, "Increasing the number of roots in the FCI solver"
+            if "SA-" in self.solver: 
+                self.qcsolver.nroots = len(self.state_average_) 
+        
         tprint.print_msg("Initializing ... DONE")       
                 
     def kernel(self, chempot=0.0):
@@ -315,10 +333,22 @@ class pDMET:
             e_cell, e_solver, RDM1 = self.qcsolver.HF()
         elif self.solver == 'MP2':
             e_cell, e_solver, RDM1 = self.qcsolver.MP2()
-        elif self.solver in ['CASCI','CASSCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CAS()    
-        elif self.solver in ['DMRG-CI','DMRG-SCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CAS(solver = 'CheMPS2')    
+        elif self.solver in ['CASCI']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASCI()    
+        elif self.solver in ['DMRG-CI']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASCI(solver = 'CheMPS2') 
+        elif self.solver in ['CASSCF']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF()    
+        elif self.solver in ['DMRG-SCF']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2') 
+        elif self.solver in ['SS-CASSCF']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_specific_=self.state_specific_) 
+        elif self.solver in ['SA-CASSCF']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_average_=self.state_average_) 
+        elif self.solver in ['SS-DMRG-SCF']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_specific_) 
+        elif self.solver in ['SA-DMRG-SCF']:
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_average_) 
         elif self.solver == 'FCI':
             e_cell, e_solver, RDM1 = self.qcsolver.FCI()
         elif self.solver == 'DMRG':
@@ -430,9 +460,11 @@ class pDMET:
         else:      
             tprint.print_msg("   Bath type: %s | QC Solver: %s | 2S = %d | Nroots: %d" % (self.bathtype, self.solver, self.twoS, self.nroots))
             
-        if self.solver in ['CASCI','CASSCF','DMRG-CI','DMRG-SCF']:                
+        if self.solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:                
             if self.qcsolver.cas is not None: tprint.print_msg("   Active space     :", self.qcsolver.cas)
             if self.qcsolver.cas is not None: tprint.print_msg("   Active space MOs :", self.qcsolver.molist)
+            if "SS-" in self.solver: tprint.print_msg("   State id  :", self.state_specific_)
+            if "SA-" in self.solver: tprint.print_msg("   Weight    :", self.state_average_)
             
         self._cycle = 1 
         if not proj_DMET:
@@ -447,10 +479,10 @@ class pDMET:
             self.chempot = optimize.newton(self.nelec_cost_func, self.chempot)
             tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_per_cell))
             
-        if self.nroots > 1:
+        if isinstance(self.e_tot, list):
             tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot[0]))    
             for i, e in enumerate(self.e_tot):
-                tprint.print_msg("      Root %d: E = %12.8f" % (i, e))  
+                tprint.print_msg("      State %d: E = %12.8f" % (i, e))  
         else:
             tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))    
         
