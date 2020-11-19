@@ -22,7 +22,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 import numpy as np
 import sys, os, ctypes
 from functools import reduce
-from pyscf import lib, gto, ao2mo, scf, cc, fci, mcscf
+from pyscf import lib, gto, ao2mo, scf, cc, fci, mcscf, mrpt
 from pyscf.cc import ccsd_t_lambda_slow as ccsd_t_lambda
 from pyscf.cc import ccsd_t_rdm_slow as ccsd_t_rdm
 
@@ -774,7 +774,7 @@ class QCsolvers:
 #########################################        
 ##########     CASCI solver    ##########
 #########################################          
-    def CASCI(self, solver = 'FCI'):
+    def CASCI(self, solver = 'FCI', nevpt2_roots=None, nevpt2_nroots=10):
         '''
         CASCI with FCI or DMRG solver for a multiple roots calculation
         '''        
@@ -829,7 +829,7 @@ class QCsolvers:
         else: 
             e_tot, e_cas, fcivec = self.mc.kernel()[:3]
     
-        if self.mc.converged == False: print('           WARNING: The solver is not converged')
+        if not self.mc.converged: print('           WARNING: The solver is not converged')
         
         # Save mo for the next iterations
         self.mo     = self.mc.mo_coeff           
@@ -879,11 +879,11 @@ class QCsolvers:
             RDM1 = []  
             e_cell = []           
             for i, civec in enumerate(fcivec):
-                SS = self.mc.fcisolver.spin_square(civec, self.Norb, self.mol.nelec)[0]
-                RDM1_mo , RDM2_mo = self.mc.fcisolver.make_rdm12(civec, self.Norb, self.mol.nelec)
+                SS = self.mc.fcisolver.spin_square(civec, cas_norb, self.mc.nelecas)[0]
+                RDM1_mo , RDM2_mo = self.mc.fcisolver.make_rdm12(civec, cas_norb, self.mc.nelecas)
                 
                 ###### Get RDM1 + RDM2 #####
-                core_norb = self.mc.ncore    
+                core_norb = self.mc.ncore     
                 core_MO = self.mc.mo_coeff[:,:core_norb]
                 active_MO = self.mc.mo_coeff[:,core_norb:core_norb+cas_norb] 
                 casdm1_mo, casdm2_mo = self.mc.fcisolver.make_rdm12(civec, cas_norb, self.mc.nelecas) #in CAS(MO) space    
@@ -924,13 +924,24 @@ class QCsolvers:
             e_cell = lib.einsum('i,i->',self.state_percent, e_cell)                
             self.SS = tot_SS/self.nroots  
         
+            if nevpt2_roots is not None:
+                # Run NEVPT2
+                e_nevpt = []
+                for root in nevpt2_roots:
+                    e_corr = mrpt.NEVPT(self.mc, root).kernel()
+                    e_nevpt_tot = self.mc.e_tot[root] + e_corr
+                    e_nevpt.append(e_nevpt_tot)
+                
+                #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
+                e_tot = (e_tot, e_nevpt)
+                
         return (e_cell, e_tot, RDM1)
         
 #########################################        
 ##########     CASSCF solver    ##########
 #########################################  
 
-    def CASSCF(self, solver='FCI', state_specific_=None, state_average_=None):
+    def CASSCF(self, solver='FCI', state_specific_=None, state_average_=None, nevpt2_roots=None, nevpt2_nroots=10):
         '''
         CASSCF with FCI or DMRG solver:
             - Ground state
@@ -969,6 +980,7 @@ class QCsolvers:
             weights = state_average_
             self.mc = self.mc.state_average_(weights)
         else:
+            state_id = 0
             self.nroots = 1
             
         self.mc.mol = self.mol   
@@ -994,11 +1006,15 @@ class QCsolvers:
         if self.mo is not None: 
             mo = self.mo
         elif self.molist is not None: 
-            mo = self.mc.sort_mo(self.molist)         
+            mo = self.mc.sort_mo(self.molist)
+            print(self.molist)
         else: 
             mo = self.mc.mo_coeff
             
-        e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3]   
+        e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3]  
+        if state_specific_ is None and state_average_ is not None: 
+            e_tot = self.mc.e_states
+            
         if self.mc.converged == False: print('           WARNING: The solver is not converged')
         
         # Save mo for the next iterations
@@ -1013,7 +1029,7 @@ class QCsolvers:
             core_norb = self.mc.ncore    
             core_MO = self.mc.mo_coeff[:,:core_norb]
             active_MO = self.mc.mo_coeff[:,core_norb:core_norb+cas_norb] 
-            casdm1_mo, casdm2_mo = self.mc.fcisolver.make_rdm12(self.mc.ci, cas_norb, self.mc.nelecas) #in CAS(MO) space    
+            casdm1_mo, casdm2_mo = self.mc.fcisolver.make_rdm12(civec, cas_norb, self.mc.nelecas) #in CAS(MO) space    
 
             # Transform the casdm1_mo to local basis
             casdm1 = lib.einsum('ap,pq->aq', active_MO, casdm1_mo)
@@ -1044,18 +1060,19 @@ class QCsolvers:
                        + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
             e_cell = self.kmf_ecore + ImpurityEnergy         
             print('       State %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (state_id, e_tot, ImpurityEnergy, self.SS))  
-        else:
+        elif state_average_ is not None:
             tot_SS = 0 
             RDM1 = []  
             e_cell = []           
+            rdm1s, rdm2s = self.mc.fcisolver.states_make_rdm12(fcivec, cas_norb, self.mc.nelecas)
             for i, civec in enumerate(fcivec):
                 SS, spin_multiplicity = mcscf.spin_square(self.mc, ci=civec)
-                '''
+
                 ###### Get RDM1 + RDM2 #####
                 core_norb = self.mc.ncore    
                 core_MO = self.mc.mo_coeff[:,:core_norb]
                 active_MO = self.mc.mo_coeff[:,core_norb:core_norb+cas_norb] 
-                casdm1_mo, casdm2_mo = self.mc.fcisolver.make_rdm12(civec, cas_norb, self.mc.nelecas) #in CAS(MO) space    
+                casdm1_mo, casdm2_mo = rdm1s[i], rdm2s[i]  
 
                 # Transform the casdm1_mo to local basis
                 casdm1 = lib.einsum('ap,pq->aq', active_MO, casdm1_mo)
@@ -1085,28 +1102,33 @@ class QCsolvers:
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
                 Imp_e = self.kmf_ecore + Imp_Energy_state  
-                '''
-                
-                # Work-around to avoid this part which is right now useless
-                Imp_e = 0.0
-                rdm1 = 0.0
-                
                 if state_average_ is not None:
-                    print('       State %d (%5.3f): E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, weights[i], e_tot, Imp_e, SS))  
+                    print('       State %d (%5.3f): E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, weights[i], e_tot[i], Imp_e, SS))  
 
                 tot_SS += SS                              
                 RDM1.append(rdm1) 
                 e_cell.append(Imp_e)    
 
-            '''            
-            RDM1 = lib.einsum('i,ijk->jk',self.state_percent, RDM1) 
-            e_cell = lib.einsum('i,i->',self.state_percent, e_cell) 
-            '''
-            # Work-around to avoid this part which is right now useless
-            RDM1 = 0.0
-            e_cell = 0.0
+            RDM1 = lib.einsum('i,ijk->jk',state_average_, RDM1) 
+            e_cell = lib.einsum('i,i->',state_average_, e_cell) 
             self.SS = tot_SS/self.nroots  
-        
+            
+        if nevpt2_roots is not None:
+            # Run a CASCI for an excited-state wfn
+            mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+            mc_CASCI.fcisolver.nroots = nevpt2_nroots
+            mc_CASCI.kernel(self.mc.mo_coeff)
+            
+            # Run NEVPT2
+            e_nevpt = []
+            for root in nevpt2_roots:
+                e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
+                e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
+                e_nevpt.append(e_nevpt_tot)
+            
+            #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
+            e_tot = (e_tot, e_nevpt)
+                
         return (e_cell, e_tot, RDM1)  
         
         

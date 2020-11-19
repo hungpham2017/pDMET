@@ -82,6 +82,9 @@ class pDMET:
         self._impOrbs_addlist = None
         self._num_bath = None
         self.nroots = 10
+        self.nevpt2_nroots = 10
+        self.nevpt2_roots = None
+        self.state_average_ = None
         if solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
             self.cas    = None
             self.molist = None  
@@ -283,9 +286,9 @@ class pDMET:
         # For FCI solver
         self._SS = 0.5*self.twoS*(0.5*self.twoS + 1)       
         self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self.e_shift, self.nroots, self.state_percent, verbose=self.verbose, memory=self.max_memory) 
-        if self.solver in ['CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
+        if self.solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
             self.qcsolver.cas = self.cas
-            self.qcsolver.molist = self.molist
+            self.qcsolver.molist = self.molist 
             if "SS-" in self.solver: assert self.nroots > self.state_specific_, "Increasing the number of roots in the FCI solver"
             if "SA-" in self.solver: 
                 self.qcsolver.nroots = len(self.state_average_) 
@@ -334,21 +337,21 @@ class pDMET:
         elif self.solver == 'MP2':
             e_cell, e_solver, RDM1 = self.qcsolver.MP2()
         elif self.solver in ['CASCI']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASCI()    
+            e_cell, e_solver, RDM1 = self.qcsolver.CASCI(nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)      
         elif self.solver in ['DMRG-CI']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASCI(solver = 'CheMPS2') 
+            e_cell, e_solver, RDM1 = self.qcsolver.CASCI(solver = 'CheMPS2', nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)  
         elif self.solver in ['CASSCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF()    
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)     
         elif self.solver in ['DMRG-SCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2') 
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots) 
         elif self.solver in ['SS-CASSCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_specific_=self.state_specific_) 
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_specific_=self.state_specific_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots) 
         elif self.solver in ['SA-CASSCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_average_=self.state_average_) 
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_average_=self.state_average_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)  
         elif self.solver in ['SS-DMRG-SCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_specific_) 
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_specific_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)  
         elif self.solver in ['SA-DMRG-SCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_average_) 
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_average_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots) 
         elif self.solver == 'FCI':
             e_cell, e_solver, RDM1 = self.qcsolver.FCI()
         elif self.solver == 'DMRG':
@@ -388,9 +391,16 @@ class pDMET:
                     
             self.loc_corr_1RDM_R0 += self.loc_core_1RDM
             self.nelec_per_cell = self.Nelec_total
-            self.e_tot = e_solver + self.core_energy + self.local.e_core
-            self.e_emb = e_solver 
-            self.e_imp = e_cell - self.local.e_core  
+            if self.nevpt2_roots is not None:
+                e_CAS, e_NEVPT2 = e_solver 
+                self.e_tot = e_CAS + self.core_energy + self.local.e_core
+                self.e_emb = e_CAS 
+                self.e_imp = e_cell - self.local.e_core  
+                self.e_nept2_tot = np.asarray(e_NEVPT2) + self.core_energy + self.local.e_core
+            else:
+                self.e_tot = e_solver + self.core_energy + self.local.e_core
+                self.e_emb = e_solver 
+                self.e_imp = e_cell - self.local.e_core             
         else:
             self.nelec_per_cell = np.trace(RDM1[:self.Nimp,:self.Nimp])
             self.e_tot = e_cell   
@@ -463,8 +473,8 @@ class pDMET:
         if self.solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:                
             if self.qcsolver.cas is not None: tprint.print_msg("   Active space     :", self.qcsolver.cas)
             if self.qcsolver.cas is not None: tprint.print_msg("   Active space MOs :", self.qcsolver.molist)
-            if "SS-" in self.solver: tprint.print_msg("   State id  :", self.state_specific_)
-            if "SA-" in self.solver: tprint.print_msg("   Weight    :", self.state_average_)
+            if "SS-" in self.solver: tprint.print_msg("   State-specific CASSCF using state id :", self.state_specific_)
+            if "SA-" in self.solver: tprint.print_msg("   State-average CASSCF with weight :", self.state_average_)
             
         self._cycle = 1 
         if not proj_DMET:
@@ -479,12 +489,21 @@ class pDMET:
             self.chempot = optimize.newton(self.nelec_cost_func, self.chempot)
             tprint.print_msg("   No. of electrons per cell : %12.8f" % (self.nelec_per_cell))
             
-        if isinstance(self.e_tot, list):
-            tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot[0]))    
-            for i, e in enumerate(self.e_tot):
-                tprint.print_msg("      State %d: E = %12.8f" % (i, e))  
+        if isinstance(self.e_tot, list) or isinstance(self.e_tot, np.ndarray):
+            tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot[0])) 
+            if self.state_average_ is not None:
+                for i, e in enumerate(self.e_tot):
+                    tprint.print_msg("      State %d weight %7.5f: E = %12.8f" % (i, self.state_average_[i], e))  
+            else:
+                for i, e in enumerate(self.e_tot):
+                    tprint.print_msg("      State %d: E = %12.8f" % (i, e))  
         else:
-            tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))    
+            tprint.print_msg("   Energy per cell           : %12.8f" % (self.e_tot))   
+
+        if self.nevpt2_roots is not None:
+            tprint.print_msg("   NEVPT2 energies for the selected states:") 
+            for i, e in enumerate(self.e_nept2_tot):
+                tprint.print_msg("      State %d: E = %12.8f" % (self.nevpt2_roots[i], e))  
         
         tprint.print_msg("-- One-shot DMET ... finished at %s" % (tunix.current_time()))
         tprint.print_msg()            
@@ -1086,19 +1105,21 @@ class pDMET:
     def plot(self, orb = 'emb', grid = [50,50,50]):        
         '''Plot orbitals for CAS solvers
             orb = 'emb', 'mf', 'mc', 'mc_nat'
-        '''    
-        
-        if self.chkfile is not None and self.restart == True:
-            if self.restart_success != True:
-                raise Exception('Need to run at least one cycle to generate orbitals')
-        else:
-            raise Exception('Need to restart from a chkfile')                    
+        '''            
 
-        emb_orbs = self.save_pdmet.emb_orbs    
-        if orb == 'wfs' : rotate_mat = None        
-        if orb == 'emb' : rotate_mat = emb_orbs                  
-        if orb == 'mf'  : rotate_mat = emb_orbs.dot(self.save_pdmet.mf_mo)                
-        if orb == 'mc'  : rotate_mat = emb_orbs.dot(self.save_pdmet.mc_mo)    
-        if orb == 'nat' : rotate_mat = emb_orbs.dot(self.save_pdmet.mc_mo_nat)
+        emb_orbs = self.emb_orbs[0]    
+        if orb == 'wfs' : 
+            rotate_mat = None        
+        if orb == 'emb' : 
+            rotate_mat = emb_orbs                  
+        elif orb == 'mf'  : 
+            mo = self.qcsolver.mf.mo_coeff       
+            rotate_mat = emb_orbs.dot(mo)    
+        elif orb == 'mc'  : 
+            mo = self.qcsolver.mo
+            rotate_mat = emb_orbs.dot(mo)      
+        elif orb == 'nat' : 
+            mo = self.qcsolver.mo_nat  
+            rotate_mat = emb_orbs.dot(mo)     
         
         tplot.plot_wf(self.w90, rotate_mat, orb, self.kmesh, grid)                         
