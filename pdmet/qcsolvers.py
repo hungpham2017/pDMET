@@ -942,8 +942,12 @@ class QCsolvers:
             e_nevpt = []
             for root in nevpt2_roots:
                 e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
-                e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
+                if not isinstance(mc_CASCI.e_tot, np.ndarray):
+                    e_nevpt_tot = mc_CASCI.e_tot + e_corr
+                else:
+                    e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
                 e_nevpt.append(e_nevpt_tot)
+                
             #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
             e_tot = (e_tot, e_nevpt)
                 
@@ -1138,8 +1142,12 @@ class QCsolvers:
             e_nevpt = []
             for root in nevpt2_roots:
                 e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
-                e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
+                if not isinstance(mc_CASCI.e_tot, np.ndarray):
+                    e_nevpt_tot = mc_CASCI.e_tot + e_corr
+                else:
+                    e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
                 e_nevpt.append(e_nevpt_tot)
+                
             #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
             e_tot = (e_tot, e_nevpt)
                 

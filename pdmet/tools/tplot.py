@@ -164,7 +164,7 @@ def get_wannier(w90, supercell = [1,1,1], grid = [50,50,50]):
                              np.arange(-nimgs[2],nimgs[2]+1))) 
                              
     Ts = np.asarray(Ts, order='C')      #lib.cartesian_prod store array in Fortran order in memory                           
-    WFs = libwannier90.get_WFs(w90.kpt_latt_loc.shape[0],w90.kpt_latt_loc, Ts.shape[0], Ts, supercell, grid, u_mo)    
+    WFs = pywannier90.libwannier90.get_WFs(w90.kpt_latt_loc.shape[0],w90.kpt_latt_loc, Ts.shape[0], Ts, supercell, grid, u_mo)    
        
     return WFs
         
@@ -231,16 +231,16 @@ def plot_mo_gamma(mf, outfile='mo', grid=[50,50,50]):
     '''	
   
     grid = np.asarray(grid)
-    lattice = mf.cell.lattice_vectors() * param.BOHR
-    num_atoms = mf.cell.natm
-    atom_symbols = [mf.cell.atom_symbol(i) for i in range(num_atoms)]
-    atoms_cart = [mf.cell.atom_coord(i)* param.BOHR  for i in range(num_atoms)]
+    lattice = mf.mol.lattice_vectors() * param.BOHR
+    num_atoms = mf.mol.natm
+    atom_symbols = [mf.mol.atom_symbol(i) for i in range(num_atoms)]
+    atoms_cart = [mf.mol.atom_coord(i)* param.BOHR  for i in range(num_atoms)]
     origin = [0,0,0]          
     real_lattice_loc = (grid-1)/grid * lattice
     nx, ny, nz = grid  
     
-    grids_coor, weights = pywannier90.periodic_grid(mf.cell, grid, supercell=[1,1,1], order='C')	
-    ao = numint.eval_ao(mf.cell, grids_coor, kpt=[0,0,0])
+    grids_coor, weights = pywannier90.periodic_grid(mf.mol, grid, supercell=[1,1,1], order='C')	
+    ao = numint.eval_ao(mf.mol, grids_coor, kpt=[0,0,0])
     mos = lib.einsum('xi,in->xn', ao, mf.mo_coeff).T
     for i, mo in enumerate(mos):
         mo = mo.reshape(nx,ny,nz).real
