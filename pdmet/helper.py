@@ -22,7 +22,7 @@ Email: Hung Q. Pham <pqh3.14@gmail.com>
 import numpy as np
 
 
-def get_occ_r(nelec, mo_energy_kpts):
+def get_occ_rhf(nelec, mo_energy_kpts):
     ''' Get occupation numbers at k-point for a KRHF wf, modified from pbc/scf/krhf.py'''
     
     nkpts = len(mo_energy_kpts)
@@ -34,7 +34,7 @@ def get_occ_r(nelec, mo_energy_kpts):
         mo_occ_kpts.append((mo_e <= fermi).astype(np.double) * 2)
     return np.asarray(mo_occ_kpts)
 
-def get_occ_ro(nelec, mo_energy_kpts):
+def get_occ_rohf(nelec, mo_energy_kpts):
     ''' Get occupation numbers at k-point for a KROHF wf, modified from pbc/scf/krohf.py'''
 
     if hasattr(mo_energy_kpts[0], 'mo_ea'):

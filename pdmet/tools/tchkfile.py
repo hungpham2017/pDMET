@@ -58,8 +58,9 @@ def save_kmf(kmf, chkfile):
     mo_occ_kpts     = kmf.mo_occ_kpts
     mo_energy_kpts  = kmf.mo_energy_kpts
     mo_coeff_kpts   = kmf.mo_coeff_kpts
-    get_fock        = kmf.get_fock()
     make_rdm1       = kmf.make_rdm1()
+    s1e             = kmf.get_ovlp()
+    get_fock        = kmf.get_fock(s1e=s1e, dm=make_rdm1)
     
     kmf_dic = { 'exxdiv'            : exxdiv, 
                 'max_memory'        : max_memory,
@@ -75,9 +76,9 @@ def save_kmf(kmf, chkfile):
     
 def load_kmf(cell, kmf, kmesh, chkfile, max_memory=4000):
     '''
-        Save a kmf object
+        Load a kmf object
     '''
-    
+
     save_kmf = load(chkfile, 'scf')
      
     class fake_kmf:
@@ -89,6 +90,14 @@ def load_kmf(cell, kmf, kmesh, chkfile, max_memory=4000):
                 self.exxdiv     = save_kmf['exxdiv']    
                 kmf.exxdiv      = save_kmf['exxdiv']  
                 
+            from pyscf.pbc import scf
+            if isinstance(kmf, scf.krohf.KROHF):
+                self._is_ROHF = True
+            elif hasattr(kmf, '_is_ROHF'):
+                self._is_ROHF = kmf._is_ROHF
+            else:
+                self._is_ROHF = False    
+
             self.e_tot          = save_kmf['e_tot']
             self.kpts           = save_kmf['kpts']
             self.mo_occ_kpts    = save_kmf['mo_occ_kpts']

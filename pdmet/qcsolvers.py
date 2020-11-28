@@ -27,7 +27,7 @@ from pyscf.cc import ccsd_t_lambda_slow as ccsd_t_lambda
 from pyscf.cc import ccsd_t_rdm_slow as ccsd_t_rdm
 
 class QCsolvers:
-    def __init__(self, solver, twoS=0, e_shift=None, nroots=1, state_percent=None, verbose=0, memory=4000):
+    def __init__(self, solver, twoS=0, is_KROHF=False, e_shift=None, nroots=1, state_percent=None, verbose=0, memory=4000):
 
         self.solver = solver       
         self.state_percent = state_percent
@@ -35,6 +35,7 @@ class QCsolvers:
         self.twoS = twoS 
         self.e_shift = e_shift
 
+        self._is_KROHF = is_KROHF
         self.mol = gto.Mole()
         self.mol.build(verbose = 0)
         self.mol.atom.append(('S', (0, 0, 0)))
@@ -43,11 +44,12 @@ class QCsolvers:
         self.mol.max_memory = memory 
         self.mol.spin = self.twoS    
         
-        if self.mol.spin == 0:        
+        
+        if self.mol.spin == 0 and not self._is_KROHF:        
             self.mf = scf.RHF(self.mol)    
         else:     
             self.mf = scf.ROHF(self.mol)      
-            
+
         # Replace FCI solver by DMRG solver in CheMPS2 or BLOCK
         if self.solver is 'CASCI':
             self.cas    = None
@@ -151,8 +153,7 @@ class QCsolvers:
         
         Nimp = self.Nimp
         FOCKcopy = self.FOCK.copy() - self.chempot 
- 
-                
+     
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)
         self.mf.get_hcore = lambda *args: FOCKcopy
@@ -169,7 +170,7 @@ class QCsolvers:
         RDM1 = self.mf.make_rdm1()
         JK   = self.mf.get_veff(None, dm=RDM1) 
         # To calculate the impurity energy, rescale the JK matrix with a factor 0.5 to avoid double counting: 0.5 * ( OEI + FOCK ) = OEI + 0.5 * JK
-        if self.mol.spin == 0:        
+        if not self._is_KROHF:        
             ImpurityEnergy = 0.5*lib.einsum('ij,ij->', RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
                             + 0.5*lib.einsum('ij,ij->', RDM1[:Nimp,:], JK[:Nimp,:])                                                  
         else:         
@@ -182,6 +183,7 @@ class QCsolvers:
                 
         # Compute total energy        
         e_cell = self.kmf_ecore + ImpurityEnergy  
+
         return (e_cell, ERHF, RDM1) 
         
         
@@ -579,7 +581,7 @@ class QCsolvers:
                               + 0.125 * lib.einsum('ijkl,ijkl->', RDM2s[i][:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
                               + 0.125 * lib.einsum('ijkl,ijkl->', RDM2s[i][:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
                 Imp_e = self.kmf_ecore + Imp_Energy_state 
-                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, EDMRG[i], Imp_e, self.SS))                                    
+                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %8.6f' % (i, EDMRG[i], Imp_e, self.SS))                                    
                 e_cell.append(Imp_e)                
             RDM1 = lib.einsum('i,ijk->jk',self.state_percent, RDM1s) 
             e_cell = lib.einsum('i,i->',self.state_percent, e_cell)                     
@@ -663,7 +665,7 @@ class QCsolvers:
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
                 Imp_e = self.kmf_ecore + Imp_Energy_state               
-                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, EFCI[i], Imp_e, SS))                 
+                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %8.6f' % (i, EFCI[i], Imp_e, SS))                 
                 tot_SS += SS                              
                 RDM1.append(rdm1) 
                 e_cell.append(Imp_e)              
@@ -764,7 +766,7 @@ class QCsolvers:
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
                 Imp_e = self.kmf_ecore + Imp_Energy_state               
-                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, e[i], Imp_e, SS))                 
+                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %8.6f' % (i, e[i], Imp_e, SS))                 
                 tot_SS += SS                              
                 RDM1.append(rdm1) 
                 e_cell.append(Imp_e)              
@@ -825,14 +827,13 @@ class QCsolvers:
             self.mc.fix_spin_(shift = self.e_shift, ss = target_SS)                  
     
         self.mc.fcisolver.nroots = self.nroots 
-        if self.mo is not None and self.solver in ['CASSCF', 'DMRG-SCF']: 
-            e_tot, e_cas, fcivec = self.mc.kernel(self.mo)[:3]
+        if self.mo is not None: 
+            mo = self.mo
         elif self.molist is not None: 
-            mo = self.mc.sort_mo(self.molist)
-            e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3]            
+            mo = mcscf.sort_mo(self.mc, self.mc.mo_coeff, self.molist, 0)
         else: 
-            e_tot, e_cas, fcivec = self.mc.kernel()[:3]
-    
+            mo = self.mc.mo_coeff
+        e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3] 
         if not self.mc.converged: print('           WARNING: The solver is not converged')
         
         # Save mo for the next iterations
@@ -920,7 +921,7 @@ class QCsolvers:
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
                 Imp_e = self.kmf_ecore + Imp_Energy_state               
-                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, e_tot[i], Imp_e, SS))                 
+                print('       Root %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %8.6f' % (i, e_tot[i], Imp_e, SS))                 
                 tot_SS += SS                              
                 RDM1.append(rdm1) 
                 e_cell.append(Imp_e)              
@@ -935,21 +936,26 @@ class QCsolvers:
                 mc_CASCI = mc_CASCI.fix_spin_(shift=self.e_shift, ss=target_SS) 
             else:
                 mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+                
             mc_CASCI.fcisolver.nroots = nevpt2_nroots
-            mc_CASCI.kernel(self.mc.mo_coeff)
+            fcivec = mc_CASCI.kernel(self.mc.mo_coeff)[2]
 
             # Run NEVPT2
-            e_nevpt = []
+            e_casci_nevpt = []
             for root in nevpt2_roots:
+                SS = mc_CASCI.fcisolver.spin_square(fcivec[root], cas_norb, self.mc.nelecas)[0]
                 e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
                 if not isinstance(mc_CASCI.e_tot, np.ndarray):
-                    e_nevpt_tot = mc_CASCI.e_tot + e_corr
+                    e_CASCI = mc_CASCI.e_tot
+                    e_nevpt = e_CASCI + e_corr
                 else:
-                    e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
-                e_nevpt.append(e_nevpt_tot)
+                    e_CASCI = mc_CASCI.e_tot[root]
+                    e_nevpt = e_CASCI + e_corr
+                e_casci_nevpt.append([SS, e_CASCI, e_nevpt])
                 
             #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
-            e_tot = (e_tot, e_nevpt)
+            e_casci_nevpt = np.asarray(e_casci_nevpt)
+            e_tot = (e_tot, e_casci_nevpt)
                 
         return (e_cell, e_tot, RDM1)
         
@@ -969,7 +975,6 @@ class QCsolvers:
 
         Nimp = self.Nimp
         FOCKcopy = self.FOCK.copy() - self.chempot
-                
         self.mol.nelectron = self.Nel
         self.mf.__init__(self.mol)
         self.mf.get_hcore = lambda *args: FOCKcopy
@@ -998,7 +1003,8 @@ class QCsolvers:
         else:
             state_id = 0
             self.nroots = 1
-            
+            self.mc.fcisolver.nroots = self.nroots 
+        
         self.mc.mol = self.mol   
         self.mc._scf = self.mf 
         self.mc.ncas = cas_norb
@@ -1017,20 +1023,19 @@ class QCsolvers:
         elif solver == 'FCI' and self.e_shift is not None:         
             target_SS = 0.5*self.twoS*(0.5*self.twoS + 1)
             self.mc.fix_spin_(shift=self.e_shift, ss=target_SS)                  
-    
-        self.mc.fcisolver.nroots = self.nroots 
+            
         if self.mo is not None: 
             mo = self.mo
         elif self.molist is not None: 
-            mo = self.mc.sort_mo(self.molist)
+            mo = mcscf.sort_mo(self.mc, self.mc.mo_coeff, self.molist, base=0)
         else: 
             mo = self.mc.mo_coeff
-            
-        e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3]  
+
+        e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3] 
         if state_specific_ is None and state_average_ is not None: 
             e_tot = self.mc.e_states
             
-        if self.mc.converged == False: print('           WARNING: The solver is not converged')
+        if not self.mc.converged: print('           WARNING: The solver is not converged')
         
         # Save mo for the next iterations
         self.mo_nat     = self.mc.mo_coeff           
@@ -1074,7 +1079,7 @@ class QCsolvers:
                        + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
                        + 0.125 * lib.einsum('ijkl,ijkl->', RDM2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
             e_cell = self.kmf_ecore + ImpurityEnergy         
-            print('       State %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (state_id, e_tot, ImpurityEnergy, self.SS))  
+            print('       State %d: E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %8.6f' % (state_id, e_tot, ImpurityEnergy, self.SS))  
         elif state_average_ is not None:
             tot_SS = 0 
             RDM1 = []  
@@ -1118,7 +1123,7 @@ class QCsolvers:
                               + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
                 Imp_e = self.kmf_ecore + Imp_Energy_state  
                 if state_average_ is not None:
-                    print('       State %d (%5.3f): E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %12.8f' % (i, weights[i], e_tot[i], Imp_e, SS))  
+                    print('       State %d (%5.3f): E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %8.6f' % (i, weights[i], e_tot[i], Imp_e, SS))  
 
                 tot_SS += SS                              
                 RDM1.append(rdm1) 
@@ -1135,21 +1140,26 @@ class QCsolvers:
                 mc_CASCI = mc_CASCI.fix_spin_(shift=self.e_shift, ss=target_SS) 
             else:
                 mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+                
             mc_CASCI.fcisolver.nroots = nevpt2_nroots
-            mc_CASCI.kernel(self.mc.mo_coeff)
+            fcivec = mc_CASCI.kernel(self.mc.mo_coeff)[2]
 
             # Run NEVPT2
-            e_nevpt = []
+            e_casci_nevpt = []
             for root in nevpt2_roots:
+                SS = mc_CASCI.fcisolver.spin_square(fcivec[root], cas_norb, self.mc.nelecas)[0]
                 e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
                 if not isinstance(mc_CASCI.e_tot, np.ndarray):
-                    e_nevpt_tot = mc_CASCI.e_tot + e_corr
+                    e_CASCI = mc_CASCI.e_tot
+                    e_nevpt = e_CASCI + e_corr
                 else:
-                    e_nevpt_tot = mc_CASCI.e_tot[root] + e_corr
-                e_nevpt.append(e_nevpt_tot)
+                    e_CASCI = mc_CASCI.e_tot[root]
+                    e_nevpt = e_CASCI + e_corr
+                e_casci_nevpt.append([SS, e_CASCI, e_nevpt])
                 
             #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
-            e_tot = (e_tot, e_nevpt)
+            e_casci_nevpt = np.asarray(e_casci_nevpt)
+            e_tot = (e_tot, e_casci_nevpt)
                 
         return (e_cell, e_tot, RDM1)  
         

@@ -31,7 +31,7 @@ from pdmet.tools import tchkfile, tunix
     
     
 class Local:
-    def __init__(self, cell, kmf, w90, xc_omega=0.2):
+    def __init__(self, cell, kmf, w90, is_KROHF=False, xc_omega=0.2):
         '''
         TODO: need to be written
         Args:
@@ -53,6 +53,7 @@ class Local:
         self.e_tot = kmf.e_tot
         self.kmesh = w90.mp_grid_loc
         self.kmf = kmf   
+        self._is_KROHF = is_KROHF
         self.kpts = kmf.kpts
         self.Nkpts = kmf.kpts.shape[0]    
         self.nao = cell.nao_nr()
@@ -65,9 +66,13 @@ class Local:
         #-------------------------------------------------------------
         # Construct the effective Hamiltonian due to the frozen core  | 
         #-------------------------------------------------------------  
+        if self._is_KROHF:
+            self.nelec = [self.cell.nelec[0], self.cell.nelec[1]]
+            
         self.nelec_total = 0
         for mo_occ in kmf.mo_occ_kpts:
             self.nelec_total += int(mo_occ[w90.band_included_list].sum())
+
         self.nelec_per_cell = self.nelec_total // self.Nkpts
 
         full_OEI_k = kmf.get_hcore()
@@ -79,35 +84,39 @@ class Local:
             mo_k = mo_coeff[:, core_band]
             coreDMao = reduce(np.dot, (mo_k, np.diag(coreDMmo), mo_k.T.conj()))
             coreDM_kpts.append(coreDMao)
-    
+        
         self.coreDM_kpts = np.asarray(coreDM_kpts, dtype=np.complex128)
-        coreJK_kpts = kmf.get_veff(cell, self.coreDM_kpts, hermi = 1, kpts = self.kpts, kpts_band = None)
+        if self._is_KROHF:
+            dma = dmb = self.coreDM_kpts * 0.5
+            coreJK_kpts_ab = kmf.get_veff(cell, dm_kpts=[dma,dmb], hermi=1, kpts=self.kpts, kpts_band=None)
+            coreJK_kpts = 0.5 * (coreJK_kpts_ab[0] + coreJK_kpts_ab[1])
+        else:
+            coreJK_kpts = kmf.get_veff(cell, self.coreDM_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
 
         # Core energy from the frozen orbitals
         self.e_core = cell.energy_nuc() + 1./self.Nkpts *lib.einsum('kij,kji->', full_OEI_k + 0.5*coreJK_kpts, self.coreDM_kpts).real
                
         # 1e integral for the active part
         self.actOEI_kpts = full_OEI_k + coreJK_kpts     
-        self.loc_actOEI_kpts = self.ao_2_loc(self.actOEI_kpts, self.ao2lo)
-
+        
         # Fock for the active part          
         self.fullfock_kpts = kmf.get_fock()            
         self.loc_actFOCK_kpts = self.ao_2_loc(self.fullfock_kpts, self.ao2lo)     
-        self.actJK_kpts = self.fullfock_kpts - self.actOEI_kpts 
-        self.loc_actJK_kpts = self.ao_2_loc(self.actJK_kpts, self.ao2lo)      #DEBUG: used to debug, may be removed 
-        
+
         # DF-like DMET
-        self.xc_omega = xc_omega
-        dm_kpts = self.kmf.make_rdm1()
-        self.vj, self.vk = self.kmf.get_jk(dm_kpts=dm_kpts)
-        self.dm = self.kmf.make_rdm1()
-        self.h_core = self.kmf.get_hcore()
-        
-        self.kks = scf.KKS(self.cell, self.kpts).density_fit()  
-        self.kks.with_df._cderi = self.kmf.with_df._cderi 
-        if self.xc_omega is not None:
-            self.vklr = self.kmf.get_k(self.cell, self.dm, 1, self.kpts, None, omega=self.xc_omega)
-            self.vksr = self.vk - self.vklr
+        # TODO: implementing this for ROHF
+        if not self._is_KROHF:
+            self.xc_omega = xc_omega
+            dm_kpts = self.kmf.make_rdm1()
+            self.vj, self.vk = self.kmf.get_jk(dm_kpts=dm_kpts)
+            self.dm = self.kmf.make_rdm1()
+            self.h_core = self.kmf.get_hcore()
+            
+            self.kks = scf.KKS(self.cell, self.kpts).density_fit()  
+            self.kks.with_df._cderi = self.kmf.with_df._cderi 
+            if self.xc_omega is not None:
+                self.vklr = self.kmf.get_k(self.cell, self.dm, 1, self.kpts, None, omega=self.xc_omega)
+                self.vksr = self.vk - self.vklr
         
     def make_loc_1RDM_kpts(self, umat, mask4Gamma, OEH_type='FOCK', get_band=False, get_ham=False, dft_HF=None):
         '''
@@ -127,24 +136,25 @@ class Local:
             else:
                 OEH_kpts = df_hamiltonian.get_OEH_kpts(self, umat,  xc_type=OEH_type,  dft_HF=dft_HF)
             
-        if self.spin == 0:
-            eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
-            idx_kpts = eigvals.argsort()
-            eigvals = np.asarray([eigvals[kpt][idx_kpts[kpt]] for kpt in range(self.Nkpts)])
-            eigvecs = np.asarray([eigvecs[kpt][:,idx_kpts[kpt]] for kpt in range(self.Nkpts)])
-            mo_occ = helper.get_occ_r(self.nelec_total, eigvals)  
-            loc_OED = np.asarray([np.dot(eigvecs[kpt][:,mo_occ[kpt]>0]*mo_occ[kpt][mo_occ[kpt]>0], eigvecs[kpt][:,mo_occ[kpt]>0].T.conj())
-                                                for kpt in range(self.Nkpts)], dtype=np.complex128)       
-
-            if get_band:
-                return eigvals, eigvecs
-            elif get_ham:
-                return OEH_kpts, eigvals, eigvecs
-            else:
-                return OEH_kpts, loc_OED
+        eigvals, eigvecs = np.linalg.eigh(OEH_kpts)
+        idx_kpts = eigvals.argsort()
+        eigvals = np.asarray([eigvals[kpt][idx_kpts[kpt]] for kpt in range(self.Nkpts)])
+        eigvecs = np.asarray([eigvecs[kpt][:,idx_kpts[kpt]] for kpt in range(self.Nkpts)])
+        
+        if self._is_KROHF:
+            mo_occ = helper.get_occ_rohf(self.nelec, eigvals) 
         else:
-            pass 
-            # TODO: contruct RDM for a ROHF wave function            
+            mo_occ = helper.get_occ_rhf(self.nelec_total, eigvals) 
+        
+        loc_OED = np.asarray([np.dot(eigvecs[kpt][:,mo_occ[kpt]>0]*mo_occ[kpt][mo_occ[kpt]>0], eigvecs[kpt][:,mo_occ[kpt]>0].T.conj())
+                                            for kpt in range(self.Nkpts)], dtype=np.complex128)       
+
+        if get_band:
+            return eigvals, eigvecs
+        elif get_ham:
+            return OEH_kpts, eigvals, eigvecs
+        else:
+            return OEH_kpts, loc_OED       
         
     def make_loc_1RDM(self, umat, mask4Gamma, OEH_type='FOCK', dft_HF=None):
         '''
@@ -176,7 +186,13 @@ class Local:
     def get_emb_JK(self, loc_1RDM_kpts, ao2eo):
         '''Get embedding JK from a local 1-RDM'''   
         ao_1RDM_kpts = self.loc_2_ao(loc_1RDM_kpts)
-        ao_JK = self.kmf.get_veff(self.cell, ao_1RDM_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
+        if self._is_KROHF:
+            dma = dmb = ao_1RDM_kpts * 0.5
+            ao_JK_ab = self.kmf.get_veff(self.cell, dm_kpts=[dma,dmb], hermi=1, kpts=self.kpts, kpts_band=None)
+            ao_JK = 0.5 * (ao_JK_ab[0] + ao_JK_ab[1])
+        else:
+            ao_JK = self.kmf.get_veff(self.cell, dm_kpts=ao_1RDM_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
+        
         emb_JK = lib.einsum('kum,kuv,kvn->mn', ao2eo.conj(), ao_JK, ao2eo)
         self.is_real(emb_JK)
         return emb_JK.real 
@@ -184,7 +200,13 @@ class Local:
     def get_core_JK(self, ao2core, loc_core_1RDM):
         '''Get JK projected into the core (unentangled) basis''' 
         ao_core_kpts = self.loc_2_ao(loc_core_1RDM)
-        ao_core_JK = self.kmf.get_veff(self.cell, ao_core_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
+        if self._is_KROHF:
+            dma = dmb = ao_core_kpts * 0.5
+            ao_core_JK_ab = self.kmf.get_veff(self.cell, dm_kpts=[dma,dmb], hermi=1, kpts=self.kpts, kpts_band=None)
+            ao_core_JK = 0.5 * (ao_core_JK_ab[0] + ao_core_JK_ab[1])
+        else:
+            ao_core_JK = self.kmf.get_veff(self.cell, dm_kpts=ao_core_kpts, hermi=1, kpts=self.kpts, kpts_band=None)
+        
         core_JK = lib.einsum('kum,kuv,kvn->mn', ao2core.conj(), ao_core_JK, ao2core)
         self.is_real(core_JK)
         return core_JK.real 

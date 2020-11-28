@@ -112,7 +112,7 @@ class pDMET:
         
         # DMET Output
         self.state_percent      = None        
-        self.twoS               = 0
+        self.twoS               = None
         self.verbose            = 0
         self.max_memory         = 4000  # in MB 
         self.loc_OEH_kpts       = None      
@@ -128,7 +128,7 @@ class pDMET:
         self.nelec_per_cell     = None      
         
         # Others
-        self.bath_truncation = False   # if self.truncate = a threshold, then a bath truncation scheme is used          
+        self.bath_truncation = True  # if self.truncate = a threshold, then a bath truncation scheme is used          
         self.chkfile         = 'pdmet.chk'    # Save integrals in the WFs basis as well as chem potential and uvec
         self.restart         = False   # Run a calculation using saved chem potential and uvec             
         self._cycle           = 1        
@@ -150,7 +150,13 @@ class pDMET:
                     self.kmf.with_df._cderi = 'gdf.h5'
                 else:
                     print("WARNING: Provide density fitting file in initiating kmf object or make sure the saved kmf object is using the same density fitting")
-                
+            self._is_ROHF = self.kmf._is_ROHF 
+        else:
+            from pyscf.pbc import scf
+            if isinstance(self.kmf, scf.krohf.KROHF):
+                self._is_ROHF = True
+            else:
+                self._is_ROHF = False
             
         if self.kmf.exxdiv is not None: 
             raise Exception('The pDMET has not been developed for the RHF calculation with exxdiv is not None')
@@ -163,6 +169,14 @@ class pDMET:
         else:
             self.w90 = self.w90 
             
+        if self.twoS is None:
+            self.twoS = self.cell.spin
+            
+        else:
+            if self.twoS != self.cell.spin:
+                tprint.print_msg(" WARNING: the 2S in DMET is different from that of the mean-field wave function. \
+                                   Hope you know what you're doing")
+        
         assert (self.chkfile == None) or isinstance(self.chkfile,str)
         self.kpts = self.kmf.kpts
         self.Nkpts = self.kpts.shape[0]   
@@ -199,19 +213,18 @@ class pDMET:
         else:
             self.Nimp = self.local.nlo     # the whole reference unit cell is the imputity
             self._is_gamma = False
-
+            assert self.twoS ==0 , "ROHF bath is only available for Gamma-sampling calculation"
+            
         # Initilize the local space object
-        self.local = localbasis.Local(self.cell, self.kmf, self.w90, self.xc_omega)  
+        self.local = localbasis.Local(self.cell, self.kmf, self.w90, self._is_ROHF, self.xc_omega)  
         self.e_core = self.local.e_core   
         
         # -------------------------------------------------        
         # The number of bath orbitals depends on whether one does Schmidt decomposition on RHF or ROHF wave function        
-        if self.cell.spin == 0:
-            self.bathtype = 'RHF'          
+        if self._is_ROHF:
+            self.bathtype = 'ROHF'          
         else:
-            #TODO: this needs to be debugged later
-            self.bathtype = 'ROHF'            
-            #self.nBathOrbs = self.Nimp + self.cell.spin 
+            self.bathtype = 'RHF'            
             
         self.Norbs = self.local.nlo * self.Nkpts
         self.Nelec_total    = self.local.nelec_total
@@ -285,7 +298,7 @@ class pDMET:
 
         # For FCI, CAS-like solver
         self._SS = 0.5*self.twoS*(0.5*self.twoS + 1)       
-        self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self.e_shift, self.nroots, self.state_percent, verbose=self.verbose, memory=self.max_memory) 
+        self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self._is_ROHF, self.e_shift, self.nroots, self.state_percent, verbose=self.verbose, memory=self.max_memory) 
         if self.solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
             self.qcsolver.cas = self.cas
             self.qcsolver.molist = self.molist 
@@ -324,8 +337,7 @@ class pDMET:
             self.emb_mf_1RDM = self.local.loc_kpts_to_emb(self.loc_1RDM_kpts, self.emb_orbs)
             self.emb_JK = self.local.get_emb_JK(self.loc_1RDM_kpts, ao2eo)
             self.emb_coreJK = self.local.get_emb_coreJK(self.emb_JK, self.emb_TEI, self.emb_mf_1RDM)         
-
-        
+            
         #TODO: currently, the 1RDM guess is chempot independent
         #emb_guess_1RDM = self.local.get_emb_guess_1RDM(self.emb_FOCK, self.Nelec_in_emb, self.Nimp, chempot)
         emb_guess_1RDM = self.emb_mf_1RDM
@@ -354,7 +366,7 @@ class pDMET:
         elif self.solver in ['SS-DMRG-SCF']:
             e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_specific_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)  
         elif self.solver in ['SA-DMRG-SCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_average_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots) 
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_average_=self.state_average_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots) 
         elif self.solver == 'FCI':
             e_cell, e_solver, RDM1 = self.qcsolver.FCI()
         elif self.solver == 'DMRG':
@@ -368,14 +380,14 @@ class pDMET:
         
         self.emb_corr_1RDM    = RDM1
         self.loc_corr_1RDM_R0 = lib.einsum('Rim,mn,jn->Rij', self.emb_orbs, RDM1, self.emb_orbs[0].conj())
-
+        
         if not np.isclose(self._SS, self.qcsolver.SS): 
             tprint.print_msg("           WARNING: Spin contamination. Computed <S^2>: %10.8f, Target: %10.8f" % (self.qcsolver.SS, self._SS)) 
             
         # Get the cell energy:
         if self._is_gamma:
             # The Gamma-point calculation assumes one active space, so CASCI-like formular is used to compute the energy
-            if self._is_new_bath == True:
+            if self._is_new_bath:
                 if np.shape([self.core_orbs])[-1] != 0:
                     ao2core = self.local.get_ao2core(self.core_orbs)
                     lo2core = self.local.get_lo2core(self.core_orbs)
@@ -395,10 +407,14 @@ class pDMET:
             self.loc_corr_1RDM_R0 += self.loc_core_1RDM
             self.nelec_per_cell = self.Nelec_total
             if self.nevpt2_roots is not None:
-                e_CAS, e_NEVPT2 = e_solver 
+                e_CAS, e_CASCI_NEVPT2 = e_solver
+                self.ss_CASCI = e_CASCI_NEVPT2[:,0]
+                e_CASCI = e_CASCI_NEVPT2[:,1] 
+                e_NEVPT2 = e_CASCI_NEVPT2[:,2]
                 self.e_tot = e_CAS + self.core_energy + self.local.e_core
                 self.e_emb = e_CAS 
                 self.e_imp = e_cell - self.local.e_core  
+                self.e_casci_tot = np.asarray(e_CASCI) + self.core_energy + self.local.e_core
                 self.e_nept2_tot = np.asarray(e_NEVPT2) + self.core_energy + self.local.e_core
             else:
                 self.e_tot = e_solver + self.core_energy + self.local.e_core
@@ -412,14 +428,15 @@ class pDMET:
         
     def bath_contruction(self, loc_1RDM_R0, impCluster):
         '''Get the bath orbitals'''
-        emb_orbs, core_orbs, Nbath = get_bath_using_RHF_1RDM(loc_1RDM_R0, impCluster, self._num_bath)
+        emb_orbs, core_orbs, Nelec, Nbath = get_bath_using_RHF_1RDM(loc_1RDM_R0, impCluster,  is_ROHF=self._is_ROHF, num_bath=self._num_bath, bath_truncation=self.bath_truncation)
         # self._num_bath is used to keep the no. of baths are the same as in the 1st cycle of SCF
         if self._num_bath is None: self._num_bath = Nbath           
         Nemb = self.Nimp + Nbath
         emb_orbs = emb_orbs.reshape(self.Nkpts, self.local.nlo, Nemb) # NR = Nkpts
         core_orbs = core_orbs.reshape(self.Nkpts, self.local.nlo, self.local.nlo - Nemb)
         Nenv = self.Norbs - Nemb
-        Nelec_in_emb = 2 * Nbath
+        Nelec_in_emb = Nelec
+
         if Nelec_in_emb > self.Nelec_total:
             Nelec_in_emb = self.Nelec_total
         elif self.Nelec_total - Nelec_in_emb > 2 * Nenv:
@@ -464,9 +481,9 @@ class pDMET:
         '''
 
         tprint.print_msg("-- One-shot DMET ... starting at %s" % (tunix.current_time()))    
-        if self.solver == 'HF' and self.twoS == 0:
+        if self.solver == 'HF' and self.twoS == 0 and not self._is_ROHF:
             tprint.print_msg("   Bath type: %s | QC Solver: %s" % (self.bathtype, 'RHF'))
-        elif self.solver == 'HF' and self.twoS != 0:        
+        elif (self.solver == 'HF' and self.twoS != 0) or (self.solver == 'HF' and self._is_ROHF):        
             tprint.print_msg("   Bath type: %s | QC Solver: %s | 2S = %d" % (self.bathtype, 'ROHF', self.twoS)) 
         elif self.solver == 'RCCSD': 
             tprint.print_msg("   Bath type: %s | QC Solver: %s | 2S = %d" % (self.bathtype, self.solver, self.twoS))        
@@ -505,8 +522,8 @@ class pDMET:
 
         if self.nevpt2_roots is not None:
             tprint.print_msg("   NEVPT2 energies for the selected states:") 
-            for i, e in enumerate(self.e_nept2_tot):
-                tprint.print_msg("      State %d: E = %12.8f" % (self.nevpt2_roots[i], e))  
+            for i, e_nevpt2 in enumerate(self.e_nept2_tot):
+                tprint.print_msg("      State %d: E(CASCI) = %12.8f   E(NEVPT2) = %12.8f   <S^2> = %8.6f" % (self.nevpt2_roots[i], self.e_casci_tot[i], e_nevpt2, self.ss_CASCI[i]))  
         
         tprint.print_msg("-- One-shot DMET ... finished at %s" % (tunix.current_time()))
         tprint.print_msg()            
