@@ -181,7 +181,7 @@ def plot_wf(w90, rotate_mat=None, outfile='MLWF', supercell=[1,1,1], grid=[50,50
     
     grid = np.asarray(grid)
     lattice = w90.cell.lattice_vectors() * param.BOHR
-    origin = np.asarray([-(grid[i]*(supercell[i]//2) + 1)/grid[i] for i in range(3)]).dot(lattice.T)          
+    origin = np.asarray([-(grid[i]*(supercell[i]//2) + 1)/grid[i] for i in range(3)]).dot(lattice)          
     real_lattice_loc = (grid*supercell-1)/grid * lattice 
     nx, ny, nz = grid*supercell    
     WFs = get_wannier(w90, supercell, grid)
