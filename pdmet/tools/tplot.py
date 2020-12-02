@@ -180,8 +180,9 @@ def plot_wf(w90, rotate_mat=None, outfile='MLWF', supercell=[1,1,1], grid=[50,50
   
     
     grid = np.asarray(grid)
-    origin = np.asarray([-(grid[i]*(supercell[i]//2) + 1)/grid[i] for i in range(3)]).dot(w90.cell.lattice_vectors().T)* param.BOHR            
-    real_lattice_loc = (grid*supercell-1)/grid * w90.cell.lattice_vectors() * param.BOHR	
+    lattice = w90.cell.lattice_vectors() * param.BOHR
+    origin = np.asarray([-(grid[i]*(supercell[i]//2) + 1)/grid[i] for i in range(3)]).dot(lattice.T)          
+    real_lattice_loc = (grid*supercell-1)/grid * lattice 
     nx, ny, nz = grid*supercell    
     WFs = get_wannier(w90, supercell, grid)
     if rotate_mat is not None: WFs = WFs.dot(rotate_mat)

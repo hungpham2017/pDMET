@@ -170,7 +170,7 @@ class QCsolvers:
         RDM1 = self.mf.make_rdm1()
         JK   = self.mf.get_veff(None, dm=RDM1) 
         # To calculate the impurity energy, rescale the JK matrix with a factor 0.5 to avoid double counting: 0.5 * ( OEI + FOCK ) = OEI + 0.5 * JK
-        if not self._is_KROHF:        
+        if self.mol.spin == 0 and not self._is_KROHF:        
             ImpurityEnergy = 0.5*lib.einsum('ij,ij->', RDM1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
                             + 0.5*lib.einsum('ij,ij->', RDM1[:Nimp,:], JK[:Nimp,:])                                                  
         else:         
