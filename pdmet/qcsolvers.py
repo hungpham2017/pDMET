@@ -885,7 +885,6 @@ class QCsolvers:
             e_cell = []           
             for i, civec in enumerate(fcivec):
                 SS = self.mc.fcisolver.spin_square(civec, cas_norb, self.mc.nelecas)[0]
-                RDM1_mo , RDM2_mo = self.mc.fcisolver.make_rdm12(civec, cas_norb, self.mc.nelecas)
                 
                 ###### Get RDM1 + RDM2 #####
                 core_norb = self.mc.ncore     
@@ -1143,11 +1142,14 @@ class QCsolvers:
                 
             mc_CASCI.fcisolver.nroots = nevpt2_nroots
             fcivec = mc_CASCI.kernel(self.mc.mo_coeff)[2]
-
+      
             # Run NEVPT2
             e_casci_nevpt = []
+            from pyscf.fci import cistring
+            print("=====================================")
             for root in nevpt2_roots:
-                SS = mc_CASCI.fcisolver.spin_square(fcivec[root], cas_norb, self.mc.nelecas)[0]
+                ci = fcivec[root]
+                SS = mc_CASCI.fcisolver.spin_square(ci, cas_norb, self.mc.nelecas)[0]
                 e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
                 if not isinstance(mc_CASCI.e_tot, np.ndarray):
                     e_CASCI = mc_CASCI.e_tot
@@ -1156,6 +1158,45 @@ class QCsolvers:
                     e_CASCI = mc_CASCI.e_tot[root]
                     e_nevpt = e_CASCI + e_corr
                 e_casci_nevpt.append([SS, e_CASCI, e_nevpt])
+                
+                ''' TODO: NEED TO BE GENERALIZED LATER '''
+                rdm1 = mc_CASCI.fcisolver.make_rdm12(ci, cas_norb, self.mc.nelecas)[0]
+                e, v = np.linalg.eigh(rdm1)
+                # Find the two SDs with most contribution 
+                strsa = np.asarray(cistring.make_strings(range(cas_norb), neleca))
+                strsb = np.asarray(cistring.make_strings(range(cas_norb), nelecb))    
+                na = len(strsa)
+                nb = len(strsb)
+                
+                idx_1st_max = abs(ci).argmax()
+                c1 = ci.flatten()[idx_1st_max]
+                stra_1st = strsa[idx_1st_max // nb]
+                strb_1st = strsb[idx_1st_max % nb ]
+                
+                abs_fcivec = abs(ci).flatten()
+                abs_fcivec[idx_1st_max] = 0.0
+                idx_2nd_max = abs_fcivec.argmax()
+                c2 = ci.flatten()[idx_2nd_max]
+                stra_2nd = strsa[idx_2nd_max // nb]
+                strb_2nd = strsb[idx_2nd_max % nb ]
+                
+                abs_fcivec[idx_2nd_max] = 0.0
+                idx_3rd_max = abs_fcivec.argmax()
+                c3 = ci.flatten()[idx_3rd_max]
+                stra_3rd = strsa[idx_3rd_max // nb]
+                strb_3rd = strsb[idx_3rd_max % nb ]
+
+                abs_fcivec[idx_3rd_max] = 0.0
+                idx_4th_max = abs_fcivec.argmax()
+                c4 = ci.flatten()[idx_4th_max]
+                stra_4th = strsa[idx_4th_max // nb]
+                strb_4th = strsb[idx_4th_max % nb ]
+                
+                print("== State {0:d}: {1:2.4f}|{2:s},{3:s}> + {4:2.4f}|{5:s},{6:s}> + {7:2.4f}|{8:s},{9:s}> + {10:2.4f}|{11:s},{12:s}>".format(root, c1, bin(stra_1st)[2:], bin(strb_1st)[2:], c2, bin(stra_2nd)[2:], bin(strb_2nd)[2:], c3, bin(stra_3rd)[2:], bin(strb_3rd)[2:], c4, bin(stra_4th)[2:], bin(strb_4th)[2:]))
+                print("   Occupancy:", e)
+                
+                ''' TODO: NEED TO BE GENERALIZED LATER '''
+            print("=====================================") 
                 
             #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
             e_casci_nevpt = np.asarray(e_casci_nevpt)
