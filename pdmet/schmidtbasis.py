@@ -26,7 +26,7 @@ def get_bath_using_RHF_1RDM(supercell_1RDM, imp_indices=None, is_ROHF=False, num
     '''
     Construct the RHF bath using the 1RDM for reference unit cell
     ref: 
-        J. Chem. Theory Comput. 2s016, 12, 2706−2719
+        J. Chem. Theory Comput. 2016, 12, 2706−2719
         
     This should work for an KROHF wfs too, resulting in an ROHF bath  with the number of bath orbitals: num_impurity + 2S          
     

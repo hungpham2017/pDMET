@@ -23,6 +23,7 @@ import numpy as np
 import sys, os, ctypes
 from functools import reduce
 from pyscf import lib, gto, ao2mo, scf, cc, fci, mcscf, mrpt
+from pyscf.mcscf import addons
 from pyscf.cc import ccsd_t_lambda_slow as ccsd_t_lambda
 from pyscf.cc import ccsd_t_rdm_slow as ccsd_t_rdm
 
@@ -80,7 +81,9 @@ class QCsolvers:
             self.mc = mcscf.CASSCF(self.mf, 2, 2)
             self.nroots = nroots  
             self.mc.verbose = verbose
-            self.mc.natorb = True            
+            self.mc.max_memory = memory 
+            self.mc.natorb = True   
+            self.chkfile = None    
         elif self.solver in ['SS-DMRG-SCF','SA-CASSCF','SA-DMRG-SCF']:
             from pyscf import dmrgscf 
             self.cas    = None
@@ -90,6 +93,7 @@ class QCsolvers:
             self.mc = mcscf.CASSCF(self.mf, 2, 2)
             self.nroots = nroots  
             self.mc.verbose = verbose 
+            self.mc.max_memory = memory 
             self.mc.natorb = True 
         elif self.solver == 'FCI':          
             self.fs = None
@@ -161,7 +165,7 @@ class QCsolvers:
         self.mf._eri = ao2mo.restore(8, self.TEI, self.Norb)
         self.mf.scf(self.DMguess)       
         DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
-       
+        
         if (self.mf.converged == False):
             self.mf.newton().kernel(dm0=DMloc)
             DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
@@ -984,7 +988,7 @@ class QCsolvers:
         if (self.mf.converged == False):
             self.mf.newton().kernel(dm0=DMloc)
             DMloc = np.dot(np.dot(self.mf.mo_coeff, np.diag(self.mf.mo_occ)), self.mf.mo_coeff.T)
-    
+
         if self.cas is None:
             cas_nelec = self.Nel
             cas_norb = self.Norb
@@ -995,10 +999,12 @@ class QCsolvers:
         # Updating mc object from the new mf, mol objects    
         if state_specific_ is not None and state_average_ is None:
             state_id = state_specific_
-            self.mc = self.mc.state_specific_(state_id)
+            if not 'FakeCISolver' in str(self.mc.fcisolver):
+                self.mc = self.mc.state_specific_(state_id)
         elif state_specific_ is None and state_average_ is not None:
             weights = state_average_
-            self.mc = self.mc.state_average_(weights)
+            if not 'FakeCISolver' in str(self.mc.fcisolver):
+                self.mc = self.mc.state_average_(weights)
         else:
             state_id = 0
             self.nroots = 1
@@ -1026,7 +1032,11 @@ class QCsolvers:
         if self.mo is not None: 
             mo = self.mo
         elif self.molist is not None: 
-            mo = mcscf.sort_mo(self.mc, self.mc.mo_coeff, self.molist, base=0)
+            if self.chkfile is not None:
+                mo = lib.chkfile.load(self.chkfile, 'mcscf/mo_coeff')
+            else:
+                mo = self.mc.mo_coeff
+            mo = mcscf.sort_mo(self.mc, mo, self.molist, base=0)
         else: 
             mo = self.mc.mo_coeff
 
@@ -1037,8 +1047,9 @@ class QCsolvers:
         if not self.mc.converged: print('           WARNING: The solver is not converged')
         
         # Save mo for the next iterations
-        self.mo_nat     = self.mc.mo_coeff           
-   
+        self.mo_nat = self.mc.mo_coeff           
+        self.mo = self.mc.mo_coeff  
+        
         # Compute energy and RDM1      
         if self.nroots == 1 or state_specific_ is not None:
             civec = fcivec
@@ -1161,7 +1172,7 @@ class QCsolvers:
                 
                 ''' TODO: NEED TO BE GENERALIZED LATER '''
                 rdm1 = mc_CASCI.fcisolver.make_rdm12(ci, cas_norb, self.mc.nelecas)[0]
-                e, v = np.linalg.eigh(rdm1)
+                e, v = np.linalg.eig(rdm1)
                 # Find the two SDs with most contribution 
                 strsa = np.asarray(cistring.make_strings(range(cas_norb), neleca))
                 strsb = np.asarray(cistring.make_strings(range(cas_norb), nelecb))    

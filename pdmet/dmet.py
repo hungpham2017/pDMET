@@ -592,6 +592,9 @@ class pDMET:
             umat_diff = umat_old - self.umat  
             rdm_diff  = rdm1_R0_old - rdm1_R0  
             energy_diff = self.e_tot - energy_old
+            if self.state_average_ is not None:
+                energy_diff = self.e_tot - energy_old
+                energy_diff = np.sum(energy_diff * np.asarray(self.state_average_))
             norm_u    = np.linalg.norm(umat_diff)             
             norm_rdm  = np.linalg.norm(rdm_diff) 
             
@@ -1122,7 +1125,7 @@ class pDMET:
         
         return mol, mf      
 
-    def plot(self, orb = 'emb', grid = [50,50,50]):        
+    def plot(self, orb = 'emb', grid = [50,50,50], path='./'):        
         '''Plot orbitals for CAS solvers
             orb = 'emb', 'mf', 'mc', 'mc_nat'
         '''            
@@ -1142,4 +1145,4 @@ class pDMET:
             mo = self.qcsolver.mo_nat  
             rotate_mat = emb_orbs.dot(mo)     
         
-        tplot.plot_wf(self.w90, rotate_mat, orb, self.kmesh, grid)                         
+        tplot.plot_wf(self.w90, rotate_mat, path + '/' + orb, self.kmesh, grid)                         

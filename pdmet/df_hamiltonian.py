@@ -262,16 +262,20 @@ def get_OEH_kpts(local, umat, xc_type='PBE0', dft_HF=None):
         
     if xc_type == 'PBE0':
         xc =  "{:.12f}*HF + {:.12f}*PBE, {:.12f}*PBE".format(*umat)
-        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
+        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm_kpts, 0, local.kpts, None)
         veff = vxc + local.vj - umat[0] * 0.5 * local.vk
         OEH_kpts = local.h_core + veff
+        if local._is_KROHF:
+            OEH_kpts = 0.5 * (OEH_kpts[0] + OEH_kpts[1])
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo)
         
     elif xc_type == 'B3LYP':
         xc =  "{:.12f}*HF + {:.12f}*LDA + {:.12f}*B88, {:.12f}*LYP + {:.12f}*VWN".format(*umat)
-        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
+        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm_kpts, 0, local.kpts, None)
         veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
         OEH_kpts = local.h_core + veff
+        if local._is_KROHF:
+            OEH_kpts = 0.5 * (OEH_kpts[0] + OEH_kpts[1])
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
 
     elif xc_type == 'RSH-PBE0':
@@ -279,7 +283,7 @@ def get_OEH_kpts(local, umat, xc_type='PBE0', dft_HF=None):
         # because the vk long-range needed to be generated 
         umat = [local.xc_omega] + np.asarray(umat).tolist()
         xc =  "{1:.12f}*SR_HF({0:.2f})+ {2:.12f}*LR_HF({0:.2f}) + {3:.12f}*PBE, {4:.12f}*PBE".format(*umat)
-        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
+        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm_kpts, 0, local.kpts, None)
         veff = vxc + local.vj - 0.5 * (umat[1]*local.vksr + umat[2]*local.vklr)
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo)
@@ -287,7 +291,7 @@ def get_OEH_kpts(local, umat, xc_type='PBE0', dft_HF=None):
     elif xc_type == 'CAMB3LYP':
         # TODO: need to debug
         xc =  '{:.12f}*SR_HF({:.12f}) + {:.12f}*LR_HF({:.12f}) + {:.12f}*ITYH + {:.12f}*B88, {:.12f}*VWN5 + {:.12f}*LYP'.format(umat)
-        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
+        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm_kpts, 0, local.kpts, None)
         veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 
@@ -296,7 +300,7 @@ def get_OEH_kpts(local, umat, xc_type='PBE0', dft_HF=None):
         x = '{:.12f}*HF + {:.12f}*' + '+ {:.12f}*'.join(GGA_X.keys())
         c = ', {:.12f}*' + '+ {:.12f}*'.join(GGA_C.keys())
         xc = (x + c).format(*umat)
-        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm, 0, local.kpts, None)
+        n, exc, vxc = local.kks._numint.nr_rks(local.cell, local.kks.grids, xc, local.dm_kpts, 0, local.kpts, None)
         veff = vxc + local.vj - umat[0] * 0.5 * local.vk  
         OEH_kpts = local.h_core + veff
         OEH_kpts = local.ao_2_loc(OEH_kpts, local.ao2lo) 

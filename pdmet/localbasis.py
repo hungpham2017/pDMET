@@ -104,19 +104,18 @@ class Local:
         self.loc_actFOCK_kpts = self.ao_2_loc(self.fullfock_kpts, self.ao2lo)     
 
         # DF-like DMET
-        # TODO: implementing this for ROHF
-        if not self._is_KROHF:
-            self.xc_omega = xc_omega
-            dm_kpts = self.kmf.make_rdm1()
-            self.vj, self.vk = self.kmf.get_jk(dm_kpts=dm_kpts)
-            self.dm = self.kmf.make_rdm1()
-            self.h_core = self.kmf.get_hcore()
-            
+        self.xc_omega = xc_omega
+        self.dm_kpts = self.kmf.make_rdm1()
+        self.vj, self.vk = self.kmf.get_jk(dm_kpts=self.dm_kpts)
+        self.h_core = self.kmf.get_hcore() 
+        if self._is_KROHF:
+            self.kks = scf.KROKS(self.cell, self.kpts).density_fit()
+        else:
             self.kks = scf.KKS(self.cell, self.kpts).density_fit()  
-            self.kks.with_df._cderi = self.kmf.with_df._cderi 
-            if self.xc_omega is not None:
-                self.vklr = self.kmf.get_k(self.cell, self.dm, 1, self.kpts, None, omega=self.xc_omega)
-                self.vksr = self.vk - self.vklr
+        self.kks.with_df._cderi = self.kmf.with_df._cderi 
+        if self.xc_omega is not None:
+            self.vklr = self.kmf.get_k(self.cell, self.dm_kpts, 1, self.kpts, None, omega=self.xc_omega)
+            self.vksr = self.vk - self.vklr
         
     def make_loc_1RDM_kpts(self, umat, mask4Gamma, OEH_type='FOCK', get_band=False, get_ham=False, dft_HF=None):
         '''
