@@ -966,7 +966,7 @@ class QCsolvers:
 ##########     CASSCF solver    ##########
 #########################################  
 
-    def CASSCF(self, solver='FCI', state_specific_=None, state_average_=None, state_average_mix_=None, nevpt2_roots=None, nevpt2_nroots=10):
+    def CASSCF(self, solver='FCI', state_specific_=None, state_average_=None, state_average_mix_=None, nevpt2_roots=None, nevpt2_nroots=10, nevpt2_spin=0.0):
         '''
         CASSCF with FCI or DMRG solver:
             - Ground state
@@ -1158,7 +1158,11 @@ class QCsolvers:
             # else:
                 # mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
                 
-            mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+            self.mf.spin = nevpt2_spin
+            nelecb = (cas_nelec - self.mf.spin)//2
+            neleca = cas_nelec - nelecb
+            nelecas = (neleca, nelecb)
+            mc_CASCI = mcscf.CASCI(self.mf, cas_norb, (neleca, nelecb))
             mc_CASCI.fcisolver.nroots = nevpt2_nroots
             fcivec = mc_CASCI.kernel(self.mc.mo_coeff)[2]
 
@@ -1169,7 +1173,7 @@ class QCsolvers:
             if len(nevpt2_roots) > len(fcivec): nevpt2_roots = np.arange(len(fcivec))
             for root in nevpt2_roots:
                 ci = fcivec[root]
-                SS = mc_CASCI.fcisolver.spin_square(ci, cas_norb, self.mc.nelecas)[0]
+                SS = mc_CASCI.fcisolver.spin_square(ci, cas_norb, nelecas)[0]
                 e_corr = mrpt.NEVPT(mc_CASCI, root).kernel()
                 if not isinstance(mc_CASCI.e_tot, np.ndarray):
                     e_CASCI = mc_CASCI.e_tot
@@ -1180,7 +1184,7 @@ class QCsolvers:
                 e_casci_nevpt.append([SS, e_CASCI, e_nevpt])
                 
                 ''' TODO: NEED TO BE GENERALIZED LATER '''
-                rdm1 = mc_CASCI.fcisolver.make_rdm12(ci, cas_norb, self.mc.nelecas)[0]
+                rdm1 = mc_CASCI.fcisolver.make_rdm12(ci, cas_norb, nelecas)[0]
                 e, v = np.linalg.eig(rdm1)
                 # Find the two SDs with most contribution 
                 strsa = np.asarray(cistring.make_strings(range(cas_norb), neleca))
