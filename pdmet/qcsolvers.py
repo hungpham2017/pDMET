@@ -84,7 +84,7 @@ class QCsolvers:
             self.mc.max_memory = memory 
             self.mc.natorb = True   
             self.chkfile = None    
-        elif self.solver in ['SS-DMRG-SCF','SA-CASSCF','SA-DMRG-SCF']:
+        elif self.solver in ['DMRG-SCF', 'SS-DMRG-SCF','SA-DMRG-SCF']:
             from pyscf import dmrgscf 
             self.cas    = None
             self.molist = None   
