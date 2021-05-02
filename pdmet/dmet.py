@@ -34,7 +34,7 @@ import pywannier90
 
 
 class pDMET:
-    def __init__(self, cell, kmf, w90, solver = 'HF'):
+    def __init__(self, cell, kmf, w90, solver = 'HF',  state_average_mix_=None):
         '''
         Args:
             kmf                             : a rhf wave function from pyscf/pbc
@@ -85,13 +85,18 @@ class pDMET:
         self.nevpt2_nroots = 10
         self.nevpt2_roots = None
         self.state_average_ = None
+        self.state_average_mix_  = None
         if solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
             self.cas    = None
             self.molist = None  
             if solver in ['SS-CASSCF', 'SS-DMRG-SCF']:
                 self.state_specific_ = 0
             elif solver in ['SA-CASSCF', 'SA-DMRG-SCF']:
-                self.state_average_ = [0.5, 0.5]
+                if state_average_mix_ is None:
+                    self.state_average_ = [0.5, 0.5]
+                else:
+                    self.state_average_mix_ = state_average_mix_ 
+                
         
         # Parameters    
         self.SC_method          = "BFGS"        # BFGS, CG, Newton-CG
@@ -297,6 +302,7 @@ class pDMET:
             raise Exception('RCCSD solver does not support ROHF wave function')             
 
         # For FCI, CAS-like solver
+        print(qcsolvers.QCsolvers)
         self._SS = 0.5*self.twoS*(0.5*self.twoS + 1)       
         self.qcsolver = qcsolvers.QCsolvers(self.solver, self.twoS, self._is_ROHF, self.e_shift, self.nroots, self.state_percent, verbose=self.verbose, memory=self.max_memory) 
         if self.solver in ['CASCI', 'CASSCF', 'SS-CASSCF', 'SS-DMRG-SCF', 'SA-CASSCF', 'SA-DMRG-SCF']:
@@ -362,7 +368,7 @@ class pDMET:
         elif self.solver in ['SS-CASSCF']:
             e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_specific_=self.state_specific_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots) 
         elif self.solver in ['SA-CASSCF']:
-            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_average_=self.state_average_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)  
+            e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(state_average_=self.state_average_, state_average_mix_=self.state_average_mix_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)  
         elif self.solver in ['SS-DMRG-SCF']:
             e_cell, e_solver, RDM1 = self.qcsolver.CASSCF(solver = 'CheMPS2', state_specific_=self.state_specific_, nevpt2_roots=self.nevpt2_roots, nevpt2_nroots=self.nevpt2_nroots)  
         elif self.solver in ['SA-DMRG-SCF']:

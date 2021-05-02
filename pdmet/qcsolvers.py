@@ -966,7 +966,7 @@ class QCsolvers:
 ##########     CASSCF solver    ##########
 #########################################  
 
-    def CASSCF(self, solver='FCI', state_specific_=None, state_average_=None, nevpt2_roots=None, nevpt2_nroots=10):
+    def CASSCF(self, solver='FCI', state_specific_=None, state_average_=None, state_average_mix_=None, nevpt2_roots=None, nevpt2_nroots=10):
         '''
         CASSCF with FCI or DMRG solver:
             - Ground state
@@ -1001,10 +1001,13 @@ class QCsolvers:
             state_id = state_specific_
             if not 'FakeCISolver' in str(self.mc.fcisolver):
                 self.mc = self.mc.state_specific_(state_id)
-        elif state_specific_ is None and state_average_ is not None:
+        elif state_specific_ is None and state_average_ is not None and state_average_mix_ is None:
             weights = state_average_
             if not 'FakeCISolver' in str(self.mc.fcisolver):
                 self.mc = self.mc.state_average_(weights)
+        elif state_average_mix_ is not None:
+            solver1, solver2, weights = state_average_mix_
+            mcscf.state_average_mix_(self.mc, [solver1, solver2], weights)
         else:
             state_id = 0
             self.nroots = 1
@@ -1025,7 +1028,7 @@ class QCsolvers:
         # Define FCI solver
         if solver == 'CheMPS2':      
             self.mc.fcisolver = dmrgscf.CheMPS2(self.mol)
-        elif solver == 'FCI' and self.e_shift is not None:         
+        elif solver == 'FCI' and self.e_shift is not None and state_average_mix_ is None:         
             target_SS = 0.5*self.twoS*(0.5*self.twoS + 1)
             self.mc.fix_spin_(shift=self.e_shift, ss=target_SS)                  
             
@@ -1042,7 +1045,7 @@ class QCsolvers:
 
         e_tot, e_cas, fcivec = self.mc.kernel(mo)[:3] 
         if state_specific_ is None and state_average_ is not None: 
-            e_tot = self.mc.e_states
+            e_tot = np.asarray(self.mc.e_states)
             
         if not self.mc.converged: print('           WARNING: The solver is not converged')
         
@@ -1050,6 +1053,7 @@ class QCsolvers:
         self.mo_nat = self.mc.mo_coeff           
         self.mo = self.mc.mo_coeff  
         
+    
         # Compute energy and RDM1      
         if self.nroots == 1 or state_specific_ is not None:
             civec = fcivec
@@ -1095,8 +1099,10 @@ class QCsolvers:
             RDM1 = []  
             e_cell = []           
             rdm1s, rdm2s = self.mc.fcisolver.states_make_rdm12(fcivec, cas_norb, self.mc.nelecas)
-            for i, civec in enumerate(fcivec):
-                SS, spin_multiplicity = mcscf.spin_square(self.mc, ci=civec)
+            SSs, spin_multiplicities = self.mc.fcisolver.states_spin_square(fcivec, cas_norb, self.mc.nelecas) 
+            
+            for i in range(len(weights)):
+                SS, spin_multiplicity = SSs[i], spin_multiplicities[i]
 
                 ###### Get RDM1 + RDM2 #####
                 core_norb = self.mc.ncore    
@@ -1141,23 +1147,26 @@ class QCsolvers:
 
             RDM1 = lib.einsum('i,ijk->jk',state_average_, RDM1) 
             e_cell = lib.einsum('i,i->',state_average_, e_cell) 
-            self.SS = tot_SS/self.nroots  
+            # self.SS = tot_SS/self.nroots  
             
         if nevpt2_roots is not None:
+
             # Run a CASCI for an excited-state wfn
-            if solver == 'FCI' and self.e_shift is not None: 
-                mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
-                mc_CASCI = mc_CASCI.fix_spin_(shift=self.e_shift, ss=target_SS) 
-            else:
-                mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+            # if solver == 'FCI' and self.e_shift is not None: 
+                # mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
+                # mc_CASCI = mc_CASCI.fix_spin_(shift=self.e_shift, ss=target_SS) 
+            # else:
+                # mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
                 
+            mc_CASCI = mcscf.CASCI(self.mf, cas_norb, cas_nelec)
             mc_CASCI.fcisolver.nroots = nevpt2_nroots
             fcivec = mc_CASCI.kernel(self.mc.mo_coeff)[2]
-      
+
             # Run NEVPT2
             e_casci_nevpt = []
             from pyscf.fci import cistring
             print("=====================================")
+            if len(nevpt2_roots) > len(fcivec): nevpt2_roots = np.arange(len(fcivec))
             for root in nevpt2_roots:
                 ci = fcivec[root]
                 SS = mc_CASCI.fcisolver.spin_square(ci, cas_norb, self.mc.nelecas)[0]
