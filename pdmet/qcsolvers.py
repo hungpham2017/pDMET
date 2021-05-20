@@ -1122,11 +1122,11 @@ class QCsolvers:
                 casdm2 = lib.einsum('cr,abrs->abcs', active_MO, casdm2)
                 casdm2 = lib.einsum('ds,abcs->abcd', active_MO, casdm2)    
             
-                coredm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb])
+                coredm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb], dtype=np.float32)  # TODO: this is impractical for the big embedding space. Lots of memory
                 coredm2 += lib.einsum('pq,rs-> pqrs',coredm1,coredm1)
                 coredm2 -= 0.5*lib.einsum('ps,rq-> pqrs',coredm1,coredm1)
 
-                effdm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb])
+                effdm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb], dtype=np.float32)   #
                 effdm2 += 2*lib.einsum('pq,rs-> pqrs',casdm1,coredm1)
                 effdm2 -= lib.einsum('ps,rq-> pqrs',casdm1,coredm1)                
                             
