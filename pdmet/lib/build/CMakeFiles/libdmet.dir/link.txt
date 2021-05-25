@@ -1,0 +1,1 @@
+/home/gagliard/mitra054/miniconda3/bin/c++ -fPIC  -fopenmp  -shared  -o libdmet.cpython-37m-x86_64-linux-gnu.so CMakeFiles/libdmet.dir/libdmet.cpp.o -flto -lmkl_intel_lp64 -lmkl_sequential -lmkl_core 

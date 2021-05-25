@@ -1170,6 +1170,7 @@ class QCsolvers:
             # Run NEVPT2
             e_casci_nevpt = []
             t_dm1s = []
+            dm1s = []
             from pyscf.fci import cistring
             print("=====================================")
             if len(nevpt2_roots) > len(fcivec): nevpt2_roots = np.arange(len(fcivec))
@@ -1230,11 +1231,18 @@ class QCsolvers:
                 t_dm1_emb = orbcas @ t_dm1 @ orbcas.T
                 t_dm1s.append(t_dm1_emb)
                 
+                ''' Calculate Transform density matrix '''
+                dm1 = mc_CASCI.fcisolver.trans_rdm1(ci, ci, mc_CASCI.ncas, mc_CASCI.nelecas)
+                # transform density matrix to EO representation
+                orbcas = mc_CASCI.mo_coeff[:,mc_CASCI.ncore:mc_CASCI.ncore+mc_CASCI.ncas]
+                dm1_emb = orbcas @ dm1 @ orbcas.T
+                dm1s.append(dm1_emb)
+                
             print("=====================================") 
                 
             #Pack E_CASSCF and E_NEVPT2 into a tuple of e_tot
             e_casci_nevpt = np.asarray(e_casci_nevpt)
-            e_tot = (e_tot, e_casci_nevpt, t_dm1s)
+            e_tot = (e_tot, e_casci_nevpt, t_dm1s, dm1s)
                 
         return (e_cell, e_tot, RDM1)  
         

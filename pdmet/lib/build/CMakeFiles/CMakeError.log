@@ -1,0 +1,70 @@
+Determining if the function sgemm_ exists failed with the following output:
+Change Dir: /home/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/bin/gmake cmTC_83d80/fast 
+/bin/gmake -f CMakeFiles/cmTC_83d80.dir/build.make CMakeFiles/cmTC_83d80.dir/build
+gmake[1]: Entering directory `/panfs/roc/groups/6/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_83d80.dir/CheckFunctionExists.c.o
+/home/gagliard/mitra054/miniconda3/bin/cc   -DCHECK_FUNCTION_EXISTS=sgemm_   -o CMakeFiles/cmTC_83d80.dir/CheckFunctionExists.c.o   -c /home/gagliard/mitra054/miniconda3/share/cmake-3.14/Modules/CheckFunctionExists.c
+Linking C executable cmTC_83d80
+/home/gagliard/mitra054/miniconda3/bin/cmake -E cmake_link_script CMakeFiles/cmTC_83d80.dir/link.txt --verbose=1
+/home/gagliard/mitra054/miniconda3/bin/cc  -DCHECK_FUNCTION_EXISTS=sgemm_    -rdynamic CMakeFiles/cmTC_83d80.dir/CheckFunctionExists.c.o  -o cmTC_83d80 
+CMakeFiles/cmTC_83d80.dir/CheckFunctionExists.c.o: In function `main':
+CheckFunctionExists.c:(.text+0x10): undefined reference to `sgemm_'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [cmTC_83d80] Error 1
+gmake[1]: Leaving directory `/panfs/roc/groups/6/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+gmake: *** [cmTC_83d80/fast] Error 2
+
+
+Determining if the pthread_create exist failed with the following output:
+Change Dir: /home/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/bin/gmake cmTC_12986/fast 
+/bin/gmake -f CMakeFiles/cmTC_12986.dir/build.make CMakeFiles/cmTC_12986.dir/build
+gmake[1]: Entering directory `/panfs/roc/groups/6/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_12986.dir/CheckSymbolExists.c.o
+/home/gagliard/mitra054/miniconda3/bin/cc    -o CMakeFiles/cmTC_12986.dir/CheckSymbolExists.c.o   -c /home/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp/CheckSymbolExists.c
+Linking C executable cmTC_12986
+/home/gagliard/mitra054/miniconda3/bin/cmake -E cmake_link_script CMakeFiles/cmTC_12986.dir/link.txt --verbose=1
+/home/gagliard/mitra054/miniconda3/bin/cc      -rdynamic CMakeFiles/cmTC_12986.dir/CheckSymbolExists.c.o  -o cmTC_12986 
+CMakeFiles/cmTC_12986.dir/CheckSymbolExists.c.o: In function `main':
+CheckSymbolExists.c:(.text+0x16): undefined reference to `pthread_create'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [cmTC_12986] Error 1
+gmake[1]: Leaving directory `/panfs/roc/groups/6/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+gmake: *** [cmTC_12986/fast] Error 2
+
+File /home/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp/CheckSymbolExists.c:
+/* */
+#include <pthread.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef pthread_create
+  return ((int*)(&pthread_create))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
+
+Determining if the function pthread_create exists in the pthreads failed with the following output:
+Change Dir: /home/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/bin/gmake cmTC_acab4/fast 
+/bin/gmake -f CMakeFiles/cmTC_acab4.dir/build.make CMakeFiles/cmTC_acab4.dir/build
+gmake[1]: Entering directory `/panfs/roc/groups/6/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_acab4.dir/CheckFunctionExists.c.o
+/home/gagliard/mitra054/miniconda3/bin/cc   -DCHECK_FUNCTION_EXISTS=pthread_create   -o CMakeFiles/cmTC_acab4.dir/CheckFunctionExists.c.o   -c /home/gagliard/mitra054/miniconda3/share/cmake-3.14/Modules/CheckFunctionExists.c
+Linking C executable cmTC_acab4
+/home/gagliard/mitra054/miniconda3/bin/cmake -E cmake_link_script CMakeFiles/cmTC_acab4.dir/link.txt --verbose=1
+/home/gagliard/mitra054/miniconda3/bin/cc  -DCHECK_FUNCTION_EXISTS=pthread_create    -rdynamic CMakeFiles/cmTC_acab4.dir/CheckFunctionExists.c.o  -o cmTC_acab4 -lpthreads 
+/bin/ld: cannot find -lpthreads
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [cmTC_acab4] Error 1
+gmake[1]: Leaving directory `/panfs/roc/groups/6/gagliard/mitra054/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+gmake: *** [cmTC_acab4/fast] Error 2
+
+

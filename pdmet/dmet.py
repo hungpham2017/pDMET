@@ -417,7 +417,7 @@ class pDMET:
             self.loc_corr_1RDM_R0 += self.loc_core_1RDM
             self.nelec_per_cell = self.Nelec_total
             if self.nevpt2_roots is not None:
-                e_CAS, e_CASCI_NEVPT2, t_dm1s = e_solver
+                e_CAS, e_CASCI_NEVPT2, t_dm1s, dm1s = e_solver
                 self.ss_CASCI = e_CASCI_NEVPT2[:,0]
                 e_CASCI = e_CASCI_NEVPT2[:,1] 
                 e_NEVPT2 = e_CASCI_NEVPT2[:,2]
@@ -427,6 +427,7 @@ class pDMET:
                 self.e_casci_tot = np.asarray(e_CASCI) + self.core_energy + self.local.e_core
                 self.e_nept2_tot = np.asarray(e_NEVPT2) + self.core_energy + self.local.e_core
                 self.t_dm1s = t_dm1s
+                self.dm1s = dm1s
             else:
                 self.e_tot = e_solver + self.core_energy + self.local.e_core
                 self.e_emb = e_solver 
@@ -1178,8 +1179,35 @@ class pDMET:
             # transform density matrix from MO to AO representation
             t_dm1_ao = ao2eo @ t_dm1_emb @ ao2eo.T.conj()
             return np.einsum('xij,ji->x', dip_ints, t_dm1_ao).real
+          
 
         for i in range(len(self.e_nept2_tot)):
             dipole = makedip(i)
             norm = np.linalg.norm(dipole)
             print('Transition dipole between |0> and |{0:d}>: {1:3.5f} {2:3.5f} {3:3.5f} | Norm: {4:3.5f}'.format(i, dipole[0], dipole[1], dipole[2], norm))
+            
+        print("=====================================")        
+            
+    def get_dipole(self):        
+        '''Calculate transition dipole
+        '''     
+        import scipy
+        assert self.nevpt2_roots is not None, "NEVPT2 must be called to calculate the NTOs"
+        charges = self.cell.atom_charges()
+        coords = self.cell.atom_coords()
+        nuc_charge_center = np.einsum('z,zx->x', charges, coords) / charges.sum()
+        self.cell.set_common_orig_(nuc_charge_center)
+        dip_ints = self.cell.intor('cint1e_r_sph', comp=3) 
+        ao2eo = self.local.get_ao2eo(self.emb_orbs)[0]
+        def makedip(ci_id):
+            dm1_emb = self.dm1s[ci_id]
+            # transform density matrix from MO to AO representation
+            dm1_ao = ao2eo @ dm1_emb @ ao2eo.T.conj()
+            return np.einsum('xij,ji->x', dip_ints, dm1_ao).real
+
+        for i in range(len(self.e_nept2_tot)):
+            dipole = makedip(i)
+            norm = np.linalg.norm(dipole)
+            print('Dipole moment for state |{0:d}> : {1:3.5f} {2:3.5f} {3:3.5f} | Norm: {4:3.5f}'.format(i, dipole[0], dipole[1], dipole[2], norm))    
+            
+        print("=====================================")
