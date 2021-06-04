@@ -1117,26 +1117,33 @@ class QCsolvers:
                 rdm1 = coredm1 + casdm1   
                 
                 # Transform the casdm2_mo to local basis
-                casdm2 = lib.einsum('ap,pqrs->aqrs', active_MO, casdm2_mo)
-                casdm2 = lib.einsum('bq,aqrs->abrs', active_MO, casdm2)
-                casdm2 = lib.einsum('cr,abrs->abcs', active_MO, casdm2)
-                casdm2 = lib.einsum('ds,abcs->abcd', active_MO, casdm2)    
-            
-                coredm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb], dtype=np.float32)  # TODO: this is impractical for the big embedding space. Lots of memory
-                coredm2 += lib.einsum('pq,rs-> pqrs',coredm1,coredm1)
-                coredm2 -= 0.5*lib.einsum('ps,rq-> pqrs',coredm1,coredm1)
-
-                effdm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb], dtype=np.float32)   #
-                effdm2 += 2*lib.einsum('pq,rs-> pqrs',casdm1,coredm1)
-                effdm2 -= lib.einsum('ps,rq-> pqrs',casdm1,coredm1)                
-                            
-                rdm2 = coredm2 + casdm2 + effdm2         
+                if True: 
+                    # this is used to get around with the huge memory to get the IMP nergy which is not necessary for the Gamma-point embedding  
+                    # TODO: generalize it 
+                    Imp_Energy_state = 0
+                else:
+                    casdm2 = lib.einsum('ap,pqrs->aqrs', active_MO, casdm2_mo)
+                    casdm2 = lib.einsum('bq,aqrs->abrs', active_MO, casdm2)
+                    casdm2 = lib.einsum('cr,abrs->abcs', active_MO, casdm2)
+                    casdm2 = lib.einsum('ds,abcs->abcd', active_MO, casdm2)    
                 
-                Imp_Energy_state = 0.50  * lib.einsum('ij,ij->',     rdm1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
-                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
-                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
-                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
-                              + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
+                    coredm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb], dtype=np.float64)  # TODO: this is impractical for the big embedding space. Lots of memory
+                    coredm2 += lib.einsum('pq,rs-> pqrs',coredm1,coredm1)
+                    coredm2 -= 0.5*lib.einsum('ps,rq-> pqrs',coredm1,coredm1)
+
+                    effdm2 = np.zeros([self.Norb, self.Norb, self.Norb, self.Norb], dtype=np.float64)   #
+                    effdm2 += 2*lib.einsum('pq,rs-> pqrs',casdm1,coredm1)
+                    effdm2 -= lib.einsum('ps,rq-> pqrs',casdm1,coredm1)                
+                                
+                    rdm2 = coredm2 + casdm2 + effdm2         
+                    
+                    Imp_Energy_state = 0.50  * lib.einsum('ij,ij->',     rdm1[:Nimp,:], self.FOCK[:Nimp,:] + self.OEI[:Nimp,:]) \
+                                  + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:Nimp,:,:,:], self.TEI[:Nimp,:,:,:]) \
+                                  + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:Nimp,:,:], self.TEI[:,:Nimp,:,:]) \
+                                  + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:Nimp,:], self.TEI[:,:,:Nimp,:]) \
+                                  + 0.125 * lib.einsum('ijkl,ijkl->', rdm2[:,:,:,:Nimp], self.TEI[:,:,:,:Nimp])
+
+                                  
                 Imp_e = self.kmf_ecore + Imp_Energy_state  
                 if state_average_ is not None:
                     print('       State %d (%5.3f): E(Solver) = %12.8f  E(Imp) = %12.8f  <S^2> = %8.6f' % (i, weights[i], e_tot[i], Imp_e, SS))  
