@@ -9,10 +9,6 @@ pDMET can compute the ground-state energy as well as the quasiparticle band stru
 - Scipy 0.10 or higher 
 - wannier90 and pyWannier90 library 
 
-# Current function
-- One-shot and self-consistent pDMET calculation
-- Computing electronic band structure
-
 # How to cite?
 Please cite this paper when you use pDMET code in your research:
 H. Q. Pham, M. R. Hermes, L. Gagliardi; Periodic Electronic Structure Calculations with the Density Matrix Embedding Theory, [**J. Chem. Theory Comput.**, **2019**](https://pubs.acs.org/doi/abs/10.1021/acs.jctc.9b00939), ASAP.

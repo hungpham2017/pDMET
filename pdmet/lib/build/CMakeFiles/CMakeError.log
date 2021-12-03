@@ -1,0 +1,79 @@
+Determining if the function sgemm_ exists failed with the following output:
+Change Dir: /burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake cmTC_d9a1f/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_d9a1f.dir/build.make CMakeFiles/cmTC_d9a1f.dir/build
+gmake[1]: Entering directory '/burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_d9a1f.dir/CheckFunctionExists.c.o
+/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=sgemm_ -o CMakeFiles/cmTC_d9a1f.dir/CheckFunctionExists.c.o -c /burg/home/hqp2000/.conda/envs/lion/share/cmake-3.19/Modules/CheckFunctionExists.c
+Linking C executable cmTC_d9a1f
+/burg/home/hqp2000/.conda/envs/lion/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d9a1f.dir/link.txt --verbose=1
+/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=sgemm_ -rdynamic CMakeFiles/cmTC_d9a1f.dir/CheckFunctionExists.c.o -o cmTC_d9a1f 
+CMakeFiles/cmTC_d9a1f.dir/CheckFunctionExists.c.o: In function `main':
+CheckFunctionExists.c:(.text+0x10): undefined reference to `sgemm_'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_d9a1f.dir/build.make:106: cmTC_d9a1f] Error 1
+gmake[1]: Leaving directory '/burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+gmake: *** [Makefile:140: cmTC_d9a1f/fast] Error 2
+
+
+
+Performing C SOURCE FILE Test CMAKE_HAVE_LIBC_PTHREAD failed with the following output:
+Change Dir: /burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake cmTC_52526/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_52526.dir/build.make CMakeFiles/cmTC_52526.dir/build
+gmake[1]: Entering directory '/burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_52526.dir/src.c.o
+/usr/bin/cc -DCMAKE_HAVE_LIBC_PTHREAD   -o CMakeFiles/cmTC_52526.dir/src.c.o -c /burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp/src.c
+Linking C executable cmTC_52526
+/burg/home/hqp2000/.conda/envs/lion/bin/cmake -E cmake_link_script CMakeFiles/cmTC_52526.dir/link.txt --verbose=1
+/usr/bin/cc -rdynamic CMakeFiles/cmTC_52526.dir/src.c.o -o cmTC_52526 
+CMakeFiles/cmTC_52526.dir/src.c.o: In function `main':
+src.c:(.text+0x2d): undefined reference to `pthread_create'
+src.c:(.text+0x39): undefined reference to `pthread_detach'
+src.c:(.text+0x45): undefined reference to `pthread_cancel'
+src.c:(.text+0x56): undefined reference to `pthread_join'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_52526.dir/build.make:106: cmTC_52526] Error 1
+gmake[1]: Leaving directory '/burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+gmake: *** [Makefile:140: cmTC_52526/fast] Error 2
+
+
+Source file was:
+#include <pthread.h>
+
+static void* test_func(void* data)
+{
+  return data;
+}
+
+int main(void)
+{
+  pthread_t thread;
+  pthread_create(&thread, NULL, test_func, NULL);
+  pthread_detach(thread);
+  pthread_cancel(thread);
+  pthread_join(thread, NULL);
+  pthread_atfork(NULL, NULL, NULL);
+  pthread_exit(NULL);
+
+  return 0;
+}
+
+Determining if the function pthread_create exists in the pthreads failed with the following output:
+Change Dir: /burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake cmTC_68a0a/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_68a0a.dir/build.make CMakeFiles/cmTC_68a0a.dir/build
+gmake[1]: Entering directory '/burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_68a0a.dir/CheckFunctionExists.c.o
+/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=pthread_create -o CMakeFiles/cmTC_68a0a.dir/CheckFunctionExists.c.o -c /burg/home/hqp2000/.conda/envs/lion/share/cmake-3.19/Modules/CheckFunctionExists.c
+Linking C executable cmTC_68a0a
+/burg/home/hqp2000/.conda/envs/lion/bin/cmake -E cmake_link_script CMakeFiles/cmTC_68a0a.dir/link.txt --verbose=1
+/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=pthread_create -rdynamic CMakeFiles/cmTC_68a0a.dir/CheckFunctionExists.c.o -o cmTC_68a0a  -lpthreads 
+/usr/bin/ld: cannot find -lpthreads
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_68a0a.dir/build.make:106: cmTC_68a0a] Error 1
+gmake[1]: Leaving directory '/burg/home/hqp2000/pDMET/pdmet/lib/build/CMakeFiles/CMakeTmp'
+gmake: *** [Makefile:140: cmTC_68a0a/fast] Error 2
+
+
+

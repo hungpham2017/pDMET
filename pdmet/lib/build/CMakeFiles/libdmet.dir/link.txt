@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC  -fopenmp -flto -shared  -o libdmet.cpython-39-x86_64-linux-gnu.so CMakeFiles/libdmet.dir/libdmet.cpp.o   -L/home/gagliard/phamx494/anaconda/lib  -Wl,-rpath,/home/gagliard/phamx494/anaconda/lib -lmkl_intel_lp64 -lmkl_sequential -lmkl_core 
